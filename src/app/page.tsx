@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE";
@@ -8,18 +8,32 @@ type VesselEvent = {
   timeLabel: string;
   timeType: "ACTUAL" | "ESTIMATED";
   vesselName: string;
+  imo?: string;
   service?: string;
   operator?: string;
   berth?: string;
   status?: string;
 };
 
+type VesselInfo = {
+  ok: boolean;
+  imo: string;
+  loa: string | null;
+  beam: string | null;
+  source?: string;
+};
+
+type Dir = "next" | "past";
+type WindowNext = "1h" | "3h" | "24h";
+type WindowPast = "1h" | "2h" | "24h";
+type Window = WindowNext | WindowPast;
+
 function formatDateTime(iso: string) {
   const d = new Date(iso);
 
-  const date = `${d.getMonth() + 1}/${d.getDate()}/${String(
-    d.getFullYear()
-  ).slice(-2)}`;
+  const date = `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(
+    -2
+  )}`;
 
   const time = d.toLocaleTimeString([], {
     hour: "numeric",
@@ -29,28 +43,39 @@ function formatDateTime(iso: string) {
   return `${date} • ${time}`;
 }
 
-type Dir = "next" | "past";
-type WindowVal = "1h" | "2h" | "3h" | "24h";
-
 export default function HomePage() {
   const [events, setEvents] = useState<VesselEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  // Default view
   const [dir, setDir] = useState<Dir>("next");
-  const [window, setWindow] = useState<WindowVal>("24h");
+  const [timeWindow, setTimeWindow] = useState<Window>("24h");
 
-  async function load(
-    d: Dir = dir,
-    w: WindowVal = window
-  ) {
+
+  // IMO -> vessel info cache (client-side)
+  const [infoByImo, setInfoByImo] = useState<Record<string, VesselInfo>>({});
+
+  const windowLabel = useMemo(() => {
+  if (dir === "next") {
+    const w = timeWindow as WindowNext;
+    return w === "1h" ? "next hour" : w === "3h" ? "next 3 hours" : "next 24 hours";
+  } else {
+    const w = timeWindow as WindowPast;
+    return w === "1h" ? "past hour" : w === "2h" ? "past 2 hours" : "past 24 hours";
+  }
+}, [dir, timeWindow]);
+
+
+  // Cards are white in dark mode, so use a readable dark text color.
+  const metaTextColor = "rgba(0,0,0,0.72)";
+
+  async function load(d: Dir = dir, w: Window = timeWindow) {
     setLoading(true);
     try {
       setError(null);
 
-      const resp = await fetch(`/api/next-events?dir=${d}&window=${w}`, {
+      const resp = await fetch(`/api/next-events?window=${w}&dir=${d}`, {
         cache: "no-store",
       });
       const data = await resp.json();
@@ -71,40 +96,80 @@ export default function HomePage() {
     }
   }
 
-  useEffect(() => {
-    load(dir, window);
-    const id = setInterval(() => load(dir, window), 60_000);
-    return () => clearInterval(id);
-  }, [dir, window]);
+  async function loadVesselInfos(currentEvents: VesselEvent[]) {
+    const uniqueImos = Array.from(
+      new Set(
+        currentEvents
+          .map((e) => (e.imo || "").trim())
+          .filter((imo) => /^\d{7}$/.test(imo))
+      )
+    );
 
-  const windowLabel =
-    window === "1h"
-      ? "1 hour"
-      : window === "2h"
-      ? "2 hours"
-      : window === "3h"
-      ? "3 hours"
-      : "24 hours";
+    const missing = uniqueImos.filter((imo) => !infoByImo[imo]);
+    if (missing.length === 0) return;
 
-  const dirLabel = dir === "past" ? "past" : "next";
+    try {
+      const results = await Promise.all(
+        missing.map(async (imo) => {
+          const r = await fetch(`/api/vessel-info?imo=${imo}`, { cache: "no-store" });
+          const j = await r.json();
+          return j?.ok ? (j as VesselInfo) : null;
+        })
+      );
 
-  function select(d: Dir, w: WindowVal) {
-    // If user clicks the currently-selected button again, re-fetch ok
-    if (d === dir && w === window) {
-      load(d, w);
-      return;
+      const patch: Record<string, VesselInfo> = {};
+      for (const res of results) {
+        if (res?.imo) patch[res.imo] = res;
+      }
+
+      if (Object.keys(patch).length > 0) {
+        setInfoByImo((prev) => ({ ...prev, ...patch }));
+      }
+    } catch {
+      // Silent fail. Dimensions are a nice-to-have.
     }
+  }
 
-    setDir(d);
-    setWindow(w);
+  useEffect(() => {
+    load(dir, timeWindow);
+    const id = setInterval(() => load(dir, timeWindow), 60_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dir, timeWindow]);
+
+  useEffect(() => {
+    if (events.length > 0) loadVesselInfos(events);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  const nextButtons: Array<{ w: WindowNext; label: string }> = [
+    { w: "1h", label: "Next 1 hour" },
+    { w: "3h", label: "Next 3 hours" },
+    { w: "24h", label: "Next 24 hours" },
+  ];
+
+  const pastButtons: Array<{ w: WindowPast; label: string }> = [
+    { w: "1h", label: "Past 1 hour" },
+    { w: "2h", label: "Past 2 hours" },
+    { w: "24h", label: "Past 24 hours" },
+  ];
+
+  function buttonStyle(active: boolean) {
+    return {
+      padding: "8px 12px",
+      borderRadius: 10,
+      border: "1px solid #ddd",
+      background: active ? "#111" : "#fff",
+      color: active ? "#fff" : "#111",
+      cursor: "pointer",
+    } as const;
   }
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
       <h1 style={{ margin: 0 }}>Savannah Vessel Watch</h1>
-
       <p style={{ marginTop: 8, opacity: 0.75 }}>
-        All arrivals or departures in the {dirLabel} {windowLabel}. Will refresh every minute.
+        All arrivals or departures in the {windowLabel}. Refreshes every minute.
       </p>
 
       <div style={{ marginTop: 8, opacity: 0.6, fontSize: 14 }}>
@@ -112,97 +177,49 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, opacity: 0.6, fontSize: 14 }}>
-        {events.length} total moves in the {dirLabel} {windowLabel}.
+        {events.length} total moves in the {windowLabel}.
       </div>
 
-      {/* Row 1: NEXT */}
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button
-          onClick={() => select("next", "1h")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: dir === "next" && window === "1h" ? "#111" : "#fff",
-            color: dir === "next" && window === "1h" ? "#fff" : "#111",
-            cursor: "pointer",
-          }}
-        >
-          Next 1 hour
-        </button>
-
-        <button
-          onClick={() => select("next", "3h")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: dir === "next" && window === "3h" ? "#111" : "#fff",
-            color: dir === "next" && window === "3h" ? "#fff" : "#111",
-            cursor: "pointer",
-          }}
-        >
-          Next 3 hours
-        </button>
-
-        <button
-          onClick={() => select("next", "24h")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: dir === "next" && window === "24h" ? "#111" : "#fff",
-            color: dir === "next" && window === "24h" ? "#fff" : "#111",
-            cursor: "pointer",
-          }}
-        >
-          Next 24 hours
-        </button>
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        {nextButtons.map(({ w, label }) => {
+          const active = dir === "next" && timeWindow === w;
+          return (
+            <button
+              key={`next-${w}`}
+              onClick={() => {
+                if (active) load("next", w);
+                else {
+                  setDir("next");
+                  setTimeWindow(w);
+                }
+              }}
+              style={buttonStyle(active)}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Row 2: PAST */}
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <button
-          onClick={() => select("past", "1h")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: dir === "past" && window === "1h" ? "#111" : "#fff",
-            color: dir === "past" && window === "1h" ? "#fff" : "#111",
-            cursor: "pointer",
-          }}
-        >
-          Past 1 hour
-        </button>
-
-        <button
-          onClick={() => select("past", "2h")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: dir === "past" && window === "2h" ? "#111" : "#fff",
-            color: dir === "past" && window === "2h" ? "#fff" : "#111",
-            cursor: "pointer",
-          }}
-        >
-          Past 2 hours
-        </button>
-
-        <button
-          onClick={() => select("past", "24h")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: dir === "past" && window === "24h" ? "#111" : "#fff",
-            color: dir === "past" && window === "24h" ? "#fff" : "#111",
-            cursor: "pointer",
-          }}
-        >
-          Past 24 hours
-        </button>
+      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+        {pastButtons.map(({ w, label }) => {
+          const active = dir === "past" && timeWindow === w;
+          return (
+            <button
+              key={`past-${w}`}
+              onClick={() => {
+                if (active) load("past", w);
+                else {
+                  setDir("past");
+                  setTimeWindow(w as WindowNext);
+                }
+              }}
+              style={buttonStyle(active)}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -219,67 +236,83 @@ export default function HomePage() {
               borderRadius: 12,
               padding: 16,
               background: "#fafafa",
-              color: "#111",
             }}
           >
-            <strong>No moves in the {dirLabel} {windowLabel}.</strong>
-            <div style={{ marginTop: 6, color: "#555" }}>
-              Try a different window.
+            <strong>No moves in the {windowLabel}.</strong>
+            <div style={{ marginTop: 6, opacity: 0.8 }}>
+              Try a different time window.
             </div>
           </div>
         )}
 
         {!loading && !error && events.length > 0 && (
           <div style={{ display: "grid", gap: 12 }}>
-            {events.map((e, i) => (
-              <div
-                key={`${e.type}-${e.timeISO}-${i}`}
-                style={{
-                  border: "1px solid #ddd",
-                  borderRadius: 12,
-                  padding: 16,
-                  background: "#fff",
-                  color: "#111",
-                }}
-              >
+            {events.map((e, i) => {
+              const info = e.imo ? infoByImo[e.imo] : undefined;
+              const dims =
+                info && (info.loa || info.beam)
+                  ? `${info.loa ? `LOA ${info.loa}` : ""}${
+                      info.loa && info.beam ? " • " : ""
+                    }${info.beam ? `Beam ${info.beam}` : ""}`
+                  : null;
+
+              return (
                 <div
+                  key={`${e.type}-${e.timeISO}-${i}`}
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
+                    border: "1px solid #ddd",
+                    borderRadius: 12,
+                    padding: 16,
+                    background: "#fff",
                   }}
                 >
-                  <strong>{e.type}</strong>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 12,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <strong>{e.type}</strong>
 
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        padding: "2px 6px",
-                        borderRadius: 6,
-                        background:
-                          e.timeType === "ACTUAL" ? "#e6f4ea" : "#f3f3f3",
-                        color: e.timeType === "ACTUAL" ? "#137333" : "#555",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {e.timeType === "ACTUAL" ? "Actual" : "Estimated"}
-                    </span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "2px 6px",
+                          borderRadius: 6,
+                          background: e.timeType === "ACTUAL" ? "#e6f4ea" : "#f3f3f3",
+                          color: e.timeType === "ACTUAL" ? "#137333" : "#555",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {e.timeType === "ACTUAL" ? "Actual" : "Estimated"}
+                      </span>
 
-                    <strong>{formatDateTime(e.timeISO)}</strong>
+                      <strong>{formatDateTime(e.timeISO)}</strong>
+                    </div>
                   </div>
-                </div>
 
-                <div style={{ marginTop: 6, fontSize: 18 }}>{e.vesselName}</div>
+                  <div style={{ marginTop: 6, fontSize: 18 }}>{e.vesselName}</div>
 
-                <div style={{ marginTop: 6, color: "#555" }}>
-                  {e.operator && <span>{e.operator}</span>}
-                  {e.service && <span> • {e.service}</span>}
-                  {e.berth && <span> • Berth {e.berth}</span>}
-                  {e.status && <span> • {e.status}</span>}
+                  <div style={{ marginTop: 6, color: metaTextColor, fontSize: 14 }}>
+                    {e.operator && <span>{e.operator}</span>}
+                    {e.service && <span> • {e.service}</span>}
+                    {e.berth && <span> • Berth {e.berth}</span>}
+                    {e.status && <span> • {e.status}</span>}
+                    {e.imo && <span> • IMO {e.imo}</span>}
+                  </div>
+
+                  {dims && (
+                    <div style={{ marginTop: 6, color: metaTextColor, fontSize: 14 }}>
+                      {dims}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
