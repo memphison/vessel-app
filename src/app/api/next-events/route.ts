@@ -88,6 +88,18 @@ export async function GET(req: Request) {
   const payload = await resp.json();
   const rows: VesselRow[] = payload?.data || [];
 
+    // DEBUG MODE: inspect what fields exist in the source JSON rows
+  const debug = searchParams.get("debug") === "1";
+  if (debug) {
+    const first = rows[0] || {};
+    return NextResponse.json({
+      rowsCount: rows.length,
+      firstRowKeys: Object.keys(first).sort(),
+      firstRow: first,
+    });
+  }
+
+
   const now = DateTime.now().setZone(TZ);
   const hours = hoursFromWindow(window);
 
