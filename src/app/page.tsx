@@ -29,19 +29,28 @@ function formatDateTime(iso: string) {
   return `${date} • ${time}`;
 }
 
+type Dir = "next" | "past";
+type WindowVal = "1h" | "2h" | "3h" | "24h";
+
 export default function HomePage() {
   const [events, setEvents] = useState<VesselEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [window, setWindow] = useState<"1h" | "3h" | "24h">("1h");
 
-  async function load(w: "1h" | "3h" | "24h" = window) {
+  // Default view
+  const [dir, setDir] = useState<Dir>("next");
+  const [window, setWindow] = useState<WindowVal>("24h");
+
+  async function load(
+    d: Dir = dir,
+    w: WindowVal = window
+  ) {
     setLoading(true);
     try {
       setError(null);
 
-      const resp = await fetch(`/api/next-events?window=${w}`, {
+      const resp = await fetch(`/api/next-events?dir=${d}&window=${w}`, {
         cache: "no-store",
       });
       const data = await resp.json();
@@ -63,23 +72,39 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    load(window);
-    const id = setInterval(() => load(window), 60_000);
+    load(dir, window);
+    const id = setInterval(() => load(dir, window), 60_000);
     return () => clearInterval(id);
-  }, [window]);
+  }, [dir, window]);
 
   const windowLabel =
     window === "1h"
-      ? "next hour"
+      ? "1 hour"
+      : window === "2h"
+      ? "2 hours"
       : window === "3h"
-      ? "next 3 hours"
-      : "next 24 hours";
+      ? "3 hours"
+      : "24 hours";
+
+  const dirLabel = dir === "past" ? "past" : "next";
+
+  function select(d: Dir, w: WindowVal) {
+    // If user clicks the currently-selected button again, re-fetch
+    if (d === dir && w === window) {
+      load(d, w);
+      return;
+    }
+
+    setDir(d);
+    setWindow(w);
+  }
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
       <h1 style={{ margin: 0 }}>Savannah Vessel Watch</h1>
+
       <p style={{ marginTop: 8, opacity: 0.75 }}>
-        All arrivals or departures in the {windowLabel}. Will refresh every minute.
+        All arrivals or departures in the {dirLabel} {windowLabel}. Will refresh every minute.
       </p>
 
       <div style={{ marginTop: 8, opacity: 0.6, fontSize: 14 }}>
@@ -87,36 +112,97 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, opacity: 0.6, fontSize: 14 }}>
-        {events.length} total moves in the {windowLabel}.
+        {events.length} total moves in the {dirLabel} {windowLabel}.
       </div>
 
+      {/* Row 1: NEXT */}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        {(["1h", "3h", "24h"] as const).map((w) => (
-          <button
-            key={w}
-            onClick={() => {
-              if (w === window) {
-                load(w);
-              } else {
-                setWindow(w);
-              }
-            }}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              background: window === w ? "#111" : "#fff",
-              color: window === w ? "#fff" : "#111",
-              cursor: "pointer",
-            }}
-          >
-            {w === "1h"
-              ? "Next 1 hour"
-              : w === "3h"
-              ? "Next 3 hours"
-              : "Next 24 hours"}
-          </button>
-        ))}
+        <button
+          onClick={() => select("next", "1h")}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #ddd",
+            background: dir === "next" && window === "1h" ? "#111" : "#fff",
+            color: dir === "next" && window === "1h" ? "#fff" : "#111",
+            cursor: "pointer",
+          }}
+        >
+          Next 1 hour
+        </button>
+
+        <button
+          onClick={() => select("next", "3h")}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #ddd",
+            background: dir === "next" && window === "3h" ? "#111" : "#fff",
+            color: dir === "next" && window === "3h" ? "#fff" : "#111",
+            cursor: "pointer",
+          }}
+        >
+          Next 3 hours
+        </button>
+
+        <button
+          onClick={() => select("next", "24h")}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #ddd",
+            background: dir === "next" && window === "24h" ? "#111" : "#fff",
+            color: dir === "next" && window === "24h" ? "#fff" : "#111",
+            cursor: "pointer",
+          }}
+        >
+          Next 24 hours
+        </button>
+      </div>
+
+      {/* Row 2: PAST */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button
+          onClick={() => select("past", "1h")}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #ddd",
+            background: dir === "past" && window === "1h" ? "#111" : "#fff",
+            color: dir === "past" && window === "1h" ? "#fff" : "#111",
+            cursor: "pointer",
+          }}
+        >
+          Past 1 hour
+        </button>
+
+        <button
+          onClick={() => select("past", "2h")}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #ddd",
+            background: dir === "past" && window === "2h" ? "#111" : "#fff",
+            color: dir === "past" && window === "2h" ? "#fff" : "#111",
+            cursor: "pointer",
+          }}
+        >
+          Past 2 hours
+        </button>
+
+        <button
+          onClick={() => select("past", "24h")}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid #ddd",
+            background: dir === "past" && window === "24h" ? "#111" : "#fff",
+            color: dir === "past" && window === "24h" ? "#fff" : "#111",
+            cursor: "pointer",
+          }}
+        >
+          Past 24 hours
+        </button>
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -136,9 +222,9 @@ export default function HomePage() {
               color: "#111",
             }}
           >
-            <strong>No moves in the {windowLabel}.</strong>
+            <strong>No moves in the {dirLabel} {windowLabel}.</strong>
             <div style={{ marginTop: 6, color: "#555" }}>
-              Try a shorter or longer window.
+              Try a different window.
             </div>
           </div>
         )}
