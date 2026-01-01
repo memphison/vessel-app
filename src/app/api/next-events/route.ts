@@ -30,12 +30,14 @@ type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE";
   timeISO: string;
   timeLabel: string;
+  timeType: "ACTUAL" | "ESTIMATED";
   vesselName: string;
   service?: string;
   operator?: string;
   berth?: string;
   status?: string;
 };
+
 
 function parseDT(dateStr?: string, timeStr?: string): DateTime | null {
   const d = (dateStr || "").trim();
@@ -55,11 +57,16 @@ function bestDT(
   actualTime?: string,
   estDate?: string,
   estTime?: string
-): DateTime | null {
+): { dt: DateTime | null; timeType: "ACTUAL" | "ESTIMATED" | null } {
   const actual = parseDT(actualDate, actualTime);
-  if (actual) return actual;
-  return parseDT(estDate, estTime);
+  if (actual) return { dt: actual, timeType: "ACTUAL" };
+
+  const estimated = parseDT(estDate, estTime);
+  if (estimated) return { dt: estimated, timeType: "ESTIMATED" };
+
+  return { dt: null, timeType: null };
 }
+
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -95,11 +102,12 @@ export async function GET(req: Request) {
     const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
     const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
 
-    if (arr && arr >= now && arr <= windowEnd) {
+    if (arr.dt && arr.dt >= now && arr.dt <= windowEnd) {
       events.push({
         type: "ARRIVAL",
-        timeISO: arr.toISO()!,
-        timeLabel: arr.toFormat("h:mm a"),
+        timeISO: arr.dt.toISO()!,
+        timeLabel: arr.dt.toFormat("h:mm a"),
+        timeType: arr.timeType!,
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -108,11 +116,12 @@ export async function GET(req: Request) {
       });
     }
 
-    if (dep && dep >= now && dep <= windowEnd) {
+    if (dep.dt && dep.dt >= now && dep.dt <= windowEnd) {
       events.push({
         type: "DEPARTURE",
-        timeISO: dep.toISO()!,
-        timeLabel: dep.toFormat("h:mm a"),
+        timeISO: dep.dt.toISO()!,
+        timeLabel: dep.dt.toFormat("h:mm a"),
+        timeType: dep.timeType!,
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -120,7 +129,7 @@ export async function GET(req: Request) {
         status: row.status,
       });
     }
-  }
+  } // <-- MISSING CLOSING BRACE HERE
 
   events.sort((a, b) => (a.timeISO < b.timeISO ? -1 : 1));
 
