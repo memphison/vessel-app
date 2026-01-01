@@ -47,6 +47,19 @@ function formatDateTime(iso: string) {
   return `${date} • ${time}`;
 }
 
+function formatNumber(n?: string | null) {
+  if (!n) return null;
+  const num = Number(n.replace(/[^\d]/g, ""));
+  return Number.isFinite(num) ? num.toLocaleString() : null;
+}
+
+function formatGrossTonnage(gt?: string | null) {
+  if (!gt) return null;
+  const num = Number(gt.replace(/[^\d]/g, ""));
+  return Number.isFinite(num) ? num.toLocaleString() : null;
+}
+
+
 export default function HomePage() {
   const [events, setEvents] = useState<VesselEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -297,18 +310,21 @@ export default function HomePage() {
                     }${info.beam ? `Beam ${info.beam}` : ""}`
                   : null;
 
-              const particulars =
-                info && (info.vesselType || info.yearBuilt || info.flag || info.grossTonnage)
-                  ? `${info.vesselType || ""}${
-                      info.vesselType && info.yearBuilt ? " • " : ""
-                    }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
-                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-                    }${info.flag ? `Flag ${info.flag}` : ""}${
-                      (info.vesselType || info.yearBuilt || info.flag) && info.grossTonnage
-                        ? " • "
-                        : ""
-                    }${info.grossTonnage ? `GT ${info.grossTonnage}` : ""}`.trim()
-                  : null;
+              const formattedGT = formatGrossTonnage(info?.grossTonnage);
+
+const particulars =
+  info &&
+  (info.vesselType || info.yearBuilt || info.flag || formattedGT)
+    ? `${info.vesselType || ""}${
+        info.vesselType && info.yearBuilt ? " • " : ""
+      }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
+        (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
+      }${info.flag ? `Flag ${info.flag}` : ""}${
+        (info.vesselType || info.yearBuilt || info.flag) && formattedGT
+          ? " • "
+          : ""
+      }${formattedGT ? `Gross Tonnage ${formattedGT}` : ""}`.trim()
+    : null;
 
               return (
                 <div
