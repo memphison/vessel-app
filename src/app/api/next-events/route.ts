@@ -12,10 +12,18 @@ type VesselRow = {
   vsl_operator?: string;
   berth?: string;
   status?: string;
+
+  // Estimated times
   eta_date?: string;
   eta_time?: string;
   etd_date?: string;
   etd_time?: string;
+
+  // Actual times (when available)
+  ata_date?: string;
+  ata_time?: string;
+  atd_date?: string;
+  atd_time?: string;
 };
 
 type VesselEvent = {
@@ -39,6 +47,18 @@ function parseDT(dateStr?: string, timeStr?: string): DateTime | null {
   });
 
   return dt.isValid ? dt : null;
+}
+
+// Prefer actual date/time when fully present and valid; otherwise fall back to estimated.
+function bestDT(
+  actualDate?: string,
+  actualTime?: string,
+  estDate?: string,
+  estTime?: string
+): DateTime | null {
+  const actual = parseDT(actualDate, actualTime);
+  if (actual) return actual;
+  return parseDT(estDate, estTime);
 }
 
 export async function GET(req: Request) {
@@ -71,14 +91,15 @@ export async function GET(req: Request) {
   const events: VesselEvent[] = [];
 
   for (const row of rows) {
-    const eta = parseDT(row.eta_date, row.eta_time);
-    const etd = parseDT(row.etd_date, row.etd_time);
+    // Use actual times when available, otherwise estimated.
+    const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
+    const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
 
-    if (eta && eta >= now && eta <= windowEnd) {
+    if (arr && arr >= now && arr <= windowEnd) {
       events.push({
         type: "ARRIVAL",
-        timeISO: eta.toISO()!,
-        timeLabel: eta.toFormat("h:mm a"),
+        timeISO: arr.toISO()!,
+        timeLabel: arr.toFormat("h:mm a"),
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -87,11 +108,11 @@ export async function GET(req: Request) {
       });
     }
 
-    if (etd && etd >= now && etd <= windowEnd) {
+    if (dep && dep >= now && dep <= windowEnd) {
       events.push({
         type: "DEPARTURE",
-        timeISO: etd.toISO()!,
-        timeLabel: etd.toFormat("h:mm a"),
+        timeISO: dep.toISO()!,
+        timeLabel: dep.toFormat("h:mm a"),
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -103,12 +124,11 @@ export async function GET(req: Request) {
 
   events.sort((a, b) => (a.timeISO < b.timeISO ? -1 : 1));
 
-return NextResponse.json({
-  window,
-  now: now.toISO(),
-  windowEnd: windowEnd.toISO(),
-  events, // all events, already sorted
-  totalInWindow: events.length,
-});
-
+  return NextResponse.json({
+    window,
+    now: now.toISO(),
+    windowEnd: windowEnd.toISO(),
+    events,
+    totalInWindow: events.length,
+  });
 }
