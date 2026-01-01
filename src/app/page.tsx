@@ -79,7 +79,7 @@ export default function HomePage() {
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
       <h1 style={{ margin: 0 }}>Savannah Vessel Watch</h1>
       <p style={{ marginTop: 8, opacity: 0.75 }}>
-        All arrivals or departures in the {windowLabel}. Refreshes every minute.
+        All arrivals or departures in the {windowLabel}. Will refresh every minute.
       </p>
 
       <div style={{ marginTop: 8, opacity: 0.6, fontSize: 14 }}>
