@@ -52,54 +52,62 @@ export default function HomePage() {
   const [dir, setDir] = useState<Dir>("next");
   const [timeWindow, setTimeWindow] = useState<Window>("24h");
 
-
-const [isDark, setIsDark] = useState(false);
-
-useEffect(() => {
-  if (typeof window === "undefined" || !window.matchMedia) return;
-
-  const mql = window.matchMedia("(prefers-color-scheme: dark)");
-  const onChange = (e: MediaQueryListEvent) => setIsDark(e.matches);
-
-  setIsDark(mql.matches);
-
-  if (typeof mql.addEventListener === "function") {
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }
-
-  // Safari fallback
-  // @ts-ignore
-  mql.addListener(onChange);
-  // @ts-ignore
-  return () => mql.removeListener(onChange);
-}, []);
-
-const theme = {
-  pageText: isDark ? "#f5f5f5" : "#111",
-  subText: isDark ? "rgba(245,245,245,0.75)" : "rgba(0,0,0,0.75)",
-  metaText: isDark ? "rgba(245,245,245,0.82)" : "rgba(0,0,0,0.72)",
-  cardBg: isDark ? "#121212" : "#fff",
-  cardBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
-  emptyBg: isDark ? "#121212" : "#fafafa",
-  emptyBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
-};
-
+  const [isDark, setIsDark] = useState(false);
 
   // IMO -> vessel info cache (client-side)
   const [infoByImo, setInfoByImo] = useState<Record<string, VesselInfo>>({});
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e: MediaQueryListEvent) => setIsDark(e.matches);
+
+    setIsDark(mql.matches);
+
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onChange);
+      return () => mql.removeEventListener("change", onChange);
+    }
+
+    // Safari fallback
+    // @ts-ignore
+    mql.addListener(onChange);
+    // @ts-ignore
+    return () => mql.removeListener(onChange);
+  }, []);
+
+  const theme = useMemo(() => {
+    return {
+      pageBg: isDark ? "#0b0b0b" : "#ffffff",
+
+      pageText: isDark ? "#f5f5f5" : "#111",
+      subText: isDark ? "rgba(245,245,245,0.75)" : "rgba(0,0,0,0.75)",
+      metaText: isDark ? "rgba(245,245,245,0.82)" : "rgba(0,0,0,0.72)",
+
+      cardBg: isDark ? "#121212" : "#fff",
+      cardBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
+
+      emptyBg: isDark ? "#121212" : "#fafafa",
+      emptyBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
+
+      buttonBorder: isDark ? "rgba(255,255,255,0.22)" : "#ddd",
+      buttonBg: isDark ? "#151515" : "#fff",
+      buttonText: isDark ? "#f5f5f5" : "#111",
+      buttonActiveBg: isDark ? "#f5f5f5" : "#111",
+      buttonActiveText: isDark ? "#111" : "#fff",
+    };
+  }, [isDark]);
+
   const windowLabel = useMemo(() => {
-  if (dir === "next") {
-    const w = timeWindow as WindowNext;
-    return w === "1h" ? "next hour" : w === "3h" ? "next 3 hours" : "next 24 hours";
-  } else {
-    const w = timeWindow as WindowPast;
-    return w === "1h" ? "past hour" : w === "2h" ? "past 2 hours" : "past 24 hours";
-  }
-}, [dir, timeWindow]);
-
-
+    if (dir === "next") {
+      const w = timeWindow as WindowNext;
+      return w === "1h" ? "next hour" : w === "3h" ? "next 3 hours" : "next 24 hours";
+    } else {
+      const w = timeWindow as WindowPast;
+      return w === "1h" ? "past hour" : w === "2h" ? "past 2 hours" : "past 24 hours";
+    }
+  }, [dir, timeWindow]);
 
   async function load(d: Dir = dir, w: Window = timeWindow) {
     setLoading(true);
@@ -189,29 +197,61 @@ const theme = {
     return {
       padding: "8px 12px",
       borderRadius: 10,
-      border: "1px solid #ddd",
-      background: active ? "#111" : "#fff",
-      color: active ? "#fff" : "#111",
+      border: `1px solid ${theme.buttonBorder}`,
+      background: active ? theme.buttonActiveBg : theme.buttonBg,
+      color: active ? theme.buttonActiveText : theme.buttonText,
       cursor: "pointer",
     } as const;
   }
 
+  function pillStyle(timeType: "ACTUAL" | "ESTIMATED") {
+    const isActual = timeType === "ACTUAL";
+
+    // Keep the pill readable on both dark and light backgrounds.
+    if (isDark) {
+      return {
+        fontSize: 12,
+        padding: "2px 6px",
+        borderRadius: 6,
+        background: isActual ? "rgba(19,115,51,0.25)" : "rgba(255,255,255,0.12)",
+        color: isActual ? "#9be7b0" : "rgba(245,245,245,0.85)",
+        fontWeight: 600,
+      } as const;
+    }
+
+    return {
+      fontSize: 12,
+      padding: "2px 6px",
+      borderRadius: 6,
+      background: isActual ? "#e6f4ea" : "#f3f3f3",
+      color: isActual ? "#137333" : "#555",
+      fontWeight: 600,
+    } as const;
+  }
+
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
+    <main
+      style={{
+        padding: 24,
+        fontFamily: "system-ui",
+        maxWidth: 880,
+        background: theme.pageBg,
+        minHeight: "100vh",
+      }}
+    >
       <h1 style={{ margin: 0, color: theme.pageText }}>Savannah Vessel Watch</h1>
 
-<p style={{ marginTop: 8, color: theme.subText }}>
-  All arrivals or departures in the {windowLabel}. Refreshes every minute.
-</p>
+      <p style={{ marginTop: 8, color: theme.subText }}>
+        All arrivals or departures in the {windowLabel}. Refreshes every minute.
+      </p>
 
-<div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
-  {lastUpdated ? `Last updated: ${lastUpdated}` : "Last updated: —"}
-</div>
+      <div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
+        {lastUpdated ? `Last updated: ${lastUpdated}` : "Last updated: —"}
+      </div>
 
-<div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-  {events.length} total moves in the {windowLabel}.
-</div>
-
+      <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
+        {events.length} total moves in the {windowLabel}.
+      </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
         {nextButtons.map(({ w, label }) => {
@@ -258,28 +298,25 @@ const theme = {
       <div style={{ marginTop: 16 }}>
         {loading && <p style={{ color: theme.pageText }}>Loading...</p>}
 
-
         {!loading && error && (
           <p style={{ color: "crimson" }}>{error} Try refreshing the page.</p>
         )}
 
         {!loading && !error && events.length === 0 && (
-         <div
-  style={{
-    border: `1px solid ${theme.emptyBorder}`,
-    borderRadius: 12,
-    padding: 16,
-    background: theme.emptyBg,
-    color: theme.pageText,
-  }}
->
-  <strong>No moves in the {windowLabel}.</strong>
-  <div style={{ marginTop: 6, color: theme.subText }}>
-    Try a different time window.
-  </div>
-</div>
-
-
+          <div
+            style={{
+              border: `1px solid ${theme.emptyBorder}`,
+              borderRadius: 12,
+              padding: 16,
+              background: theme.emptyBg,
+              color: theme.pageText,
+            }}
+          >
+            <strong>No moves in the {windowLabel}.</strong>
+            <div style={{ marginTop: 6, color: theme.subText }}>
+              Try a different time window.
+            </div>
+          </div>
         )}
 
         {!loading && !error && events.length > 0 && (
@@ -294,17 +331,16 @@ const theme = {
                   : null;
 
               return (
-               <div
-  key={`${e.type}-${e.timeISO}-${i}`}
-  style={{
-    border: `1px solid ${theme.cardBorder}`,
-    borderRadius: 12,
-    padding: 16,
-    background: theme.cardBg,
-    color: theme.pageText,
-  }}
->
-
+                <div
+                  key={`${e.type}-${e.timeISO}-${i}`}
+                  style={{
+                    border: `1px solid ${theme.cardBorder}`,
+                    borderRadius: 12,
+                    padding: 16,
+                    background: theme.cardBg,
+                    color: theme.pageText,
+                  }}
+                >
                   <div
                     style={{
                       display: "flex",
@@ -317,16 +353,7 @@ const theme = {
                     <strong>{e.type}</strong>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          padding: "2px 6px",
-                          borderRadius: 6,
-                          background: e.timeType === "ACTUAL" ? "#e6f4ea" : "#f3f3f3",
-                          color: e.timeType === "ACTUAL" ? "#137333" : "#555",
-                          fontWeight: 600,
-                        }}
-                      >
+                      <span style={pillStyle(e.timeType)}>
                         {e.timeType === "ACTUAL" ? "Actual" : "Estimated"}
                       </span>
 
@@ -337,7 +364,6 @@ const theme = {
                   <div style={{ marginTop: 6, fontSize: 18 }}>{e.vesselName}</div>
 
                   <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-
                     {e.operator && <span>{e.operator}</span>}
                     {e.service && <span> • {e.service}</span>}
                     {e.berth && <span> • Berth {e.berth}</span>}
@@ -347,8 +373,8 @@ const theme = {
 
                   {dims && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-  {dims}
-</div>
+                      {dims}
+                    </div>
                   )}
                 </div>
               );
