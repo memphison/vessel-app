@@ -303,12 +303,13 @@ export default function HomePage() {
             {events.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
-              const dims =
-  info && (info.loa || info.beam)
-    ? `${info.loa ? `Length ${String(info.loa).replace(/[^\d.]/g, "")}m` : ""}${
-        info.loa && info.beam ? " / " : ""
-      }${info.beam ? `Width ${String(info.beam).replace(/[^\d.]/g, "")}m` : ""}`
-    : null;
+             const dims =
+               info && (info.loa || info.beam)
+                ? `${info.loa ? `Length ${info.loa}` : ""}${
+                info.loa && info.beam ? " / " : ""
+                }${info.beam ? `Width ${info.beam}` : ""}`
+              : null;
+
 
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);

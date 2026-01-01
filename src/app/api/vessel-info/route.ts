@@ -56,6 +56,17 @@ export async function GET(req: Request) {
     return m ? m[1].trim() : null;
   }
 
+  function metersOnly(val: string | null) {
+  if (!val) return null;
+
+  // Try to capture the FIRST number (e.g. "262", "262.5")
+  const m = val.match(/(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+
+  return `${m[1]}m`;
+}
+
+
   function pickAny(labels: string[]) {
     for (const l of labels) {
       const v = pick(l);
@@ -64,8 +75,9 @@ export async function GET(req: Request) {
     return null;
   }
 
-  const loa = pickAny(["Length Overall", "LOA"]);
-  const beam = pickAny(["Beam"]);
+  const loa = metersOnly(pick("Length Overall"));
+const beam = metersOnly(pick("Beam"));
+
 
   const vesselType = pickAny(["Vessel type", "Vessel Type", "Type"]);
   const yearBuilt = pickAny(["Year Built", "Built"]);
