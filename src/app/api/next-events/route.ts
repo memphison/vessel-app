@@ -96,7 +96,7 @@ export async function GET(req: Request) {
   const events: VesselEvent[] = [];
 
   for (const row of rows) {
-    // ARRIVAL uses ATA first, else ETA
+    // ARRIVAL uses ATA first, else ETA ok
     const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
 
     if (arr.dt && arr.timeType && arr.dt >= now && arr.dt <= windowEnd) {
