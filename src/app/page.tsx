@@ -52,10 +52,8 @@ export default function HomePage() {
   const [dir, setDir] = useState<Dir>("next");
   const [timeWindow, setTimeWindow] = useState<Window>("24h");
 
+  // Dark mode tracking
   const [isDark, setIsDark] = useState(false);
-
-  // IMO -> vessel info cache (client-side)
-  const [infoByImo, setInfoByImo] = useState<Record<string, VesselInfo>>({});
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -77,32 +75,27 @@ export default function HomePage() {
     return () => mql.removeListener(onChange);
   }, []);
 
-  const theme = useMemo(() => {
-    return {
-      pageBg: isDark ? "#0b0b0b" : "#ffffff",
+  const theme = {
+    pageText: isDark ? "#f5f5f5" : "#111",
+    subText: isDark ? "rgba(245,245,245,0.75)" : "rgba(0,0,0,0.75)",
+    metaText: isDark ? "rgba(245,245,245,0.82)" : "rgba(0,0,0,0.72)",
+    cardBg: isDark ? "#121212" : "#fff",
+    cardBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
+    emptyBg: isDark ? "#121212" : "#fafafa",
+    emptyBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
+  };
 
-      pageText: isDark ? "#f5f5f5" : "#111",
-      subText: isDark ? "rgba(245,245,245,0.75)" : "rgba(0,0,0,0.75)",
-      metaText: isDark ? "rgba(245,245,245,0.82)" : "rgba(0,0,0,0.72)",
-
-      cardBg: isDark ? "#121212" : "#fff",
-      cardBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
-
-      emptyBg: isDark ? "#121212" : "#fafafa",
-      emptyBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
-
-      buttonBorder: isDark ? "rgba(255,255,255,0.22)" : "#ddd",
-      buttonBg: isDark ? "#151515" : "#fff",
-      buttonText: isDark ? "#f5f5f5" : "#111",
-      buttonActiveBg: isDark ? "#f5f5f5" : "#111",
-      buttonActiveText: isDark ? "#111" : "#fff",
-    };
-  }, [isDark]);
+  // IMO -> vessel info cache (client-side)
+  const [infoByImo, setInfoByImo] = useState<Record<string, VesselInfo>>({});
 
   const windowLabel = useMemo(() => {
     if (dir === "next") {
       const w = timeWindow as WindowNext;
-      return w === "1h" ? "next hour" : w === "3h" ? "next 3 hours" : "next 24 hours";
+      return w === "1h"
+        ? "next hour"
+        : w === "3h"
+        ? "next 3 hours"
+        : "next 24 hours";
     } else {
       const w = timeWindow as WindowPast;
       return w === "1h" ? "past hour" : w === "2h" ? "past 2 hours" : "past 24 hours";
@@ -135,7 +128,8 @@ export default function HomePage() {
     }
   }
 
-  async function loadVesselInfos(currentEvents: VesselEvent[]) {
+  // Fetch vessel dimensions for any IMOs we have not fetched yet.
+  function loadVesselInfos(currentEvents: VesselEvent[]) {
     const uniqueImos = Array.from(
       new Set(
         currentEvents
@@ -144,29 +138,32 @@ export default function HomePage() {
       )
     );
 
-    const missing = uniqueImos.filter((imo) => !infoByImo[imo]);
-    if (missing.length === 0) return;
+    setInfoByImo((prev) => {
+      const missing = uniqueImos.filter((imo) => !prev[imo]);
+      if (missing.length === 0) return prev;
 
-    try {
-      const results = await Promise.all(
+      Promise.all(
         missing.map(async (imo) => {
           const r = await fetch(`/api/vessel-info?imo=${imo}`, { cache: "no-store" });
           const j = await r.json();
           return j?.ok ? (j as VesselInfo) : null;
         })
-      );
+      )
+        .then((results) => {
+          const patch: Record<string, VesselInfo> = {};
+          for (const res of results) {
+            if (res?.imo) patch[res.imo] = res;
+          }
+          if (Object.keys(patch).length > 0) {
+            setInfoByImo((p) => ({ ...p, ...patch }));
+          }
+        })
+        .catch(() => {
+          // silent fail
+        });
 
-      const patch: Record<string, VesselInfo> = {};
-      for (const res of results) {
-        if (res?.imo) patch[res.imo] = res;
-      }
-
-      if (Object.keys(patch).length > 0) {
-        setInfoByImo((prev) => ({ ...prev, ...patch }));
-      }
-    } catch {
-      // Silent fail. Dimensions are a nice-to-have.
-    }
+      return prev;
+    });
   }
 
   useEffect(() => {
@@ -197,48 +194,15 @@ export default function HomePage() {
     return {
       padding: "8px 12px",
       borderRadius: 10,
-      border: `1px solid ${theme.buttonBorder}`,
-      background: active ? theme.buttonActiveBg : theme.buttonBg,
-      color: active ? theme.buttonActiveText : theme.buttonText,
+      border: `1px solid ${theme.cardBorder}`,
+      background: active ? (isDark ? "#f5f5f5" : "#111") : theme.cardBg,
+      color: active ? (isDark ? "#111" : "#fff") : theme.pageText,
       cursor: "pointer",
     } as const;
   }
 
-  function pillStyle(timeType: "ACTUAL" | "ESTIMATED") {
-    const isActual = timeType === "ACTUAL";
-
-    // Keep the pill readable on both dark and light backgrounds.
-    if (isDark) {
-      return {
-        fontSize: 12,
-        padding: "2px 6px",
-        borderRadius: 6,
-        background: isActual ? "rgba(19,115,51,0.25)" : "rgba(255,255,255,0.12)",
-        color: isActual ? "#9be7b0" : "rgba(245,245,245,0.85)",
-        fontWeight: 600,
-      } as const;
-    }
-
-    return {
-      fontSize: 12,
-      padding: "2px 6px",
-      borderRadius: 6,
-      background: isActual ? "#e6f4ea" : "#f3f3f3",
-      color: isActual ? "#137333" : "#555",
-      fontWeight: 600,
-    } as const;
-  }
-
   return (
-    <main
-      style={{
-        padding: 24,
-        fontFamily: "system-ui",
-        maxWidth: 880,
-        background: theme.pageBg,
-        minHeight: "100vh",
-      }}
-    >
+    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
       <h1 style={{ margin: 0, color: theme.pageText }}>Savannah Vessel Watch</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
@@ -353,7 +317,28 @@ export default function HomePage() {
                     <strong>{e.type}</strong>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <span style={pillStyle(e.timeType)}>
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "2px 6px",
+                          borderRadius: 6,
+                          background: isDark
+                            ? e.timeType === "ACTUAL"
+                              ? "rgba(19,115,51,0.25)"
+                              : "rgba(255,255,255,0.12)"
+                            : e.timeType === "ACTUAL"
+                            ? "#e6f4ea"
+                            : "#f3f3f3",
+                          color: isDark
+                            ? e.timeType === "ACTUAL"
+                              ? "#b7f5c9"
+                              : "rgba(245,245,245,0.85)"
+                            : e.timeType === "ACTUAL"
+                            ? "#137333"
+                            : "#555",
+                          fontWeight: 600,
+                        }}
+                      >
                         {e.timeType === "ACTUAL" ? "Actual" : "Estimated"}
                       </span>
 
@@ -370,6 +355,12 @@ export default function HomePage() {
                     {e.status && <span> • {e.status}</span>}
                     {e.imo && <span> • IMO {e.imo}</span>}
                   </div>
+
+                  {e.imo && !dims && (
+                    <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>
+                      Loading dimensions…
+                    </div>
+                  )}
 
                   {dims && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>

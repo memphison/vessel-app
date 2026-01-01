@@ -13,6 +13,9 @@ type VesselRow = {
   berth?: string;
   status?: string;
 
+  // IMO/Lloyd's ID (7 digits) when available
+  lloyds_id?: string;
+
   // Estimated times
   eta_date?: string;
   eta_time?: string;
@@ -32,6 +35,7 @@ type VesselEvent = {
   timeLabel: string; // M/D/YY h:mm AM/PM in TZ
   timeType: "ACTUAL" | "ESTIMATED";
   vesselName: string;
+  imo?: string; // 7-digit IMO (from lloyds_id)
   service?: string;
   operator?: string;
   berth?: string;
@@ -70,6 +74,11 @@ function hoursFromWindow(window: string): number {
   return 1;
 }
 
+function normalizeIMO(lloydsId?: string): string | undefined {
+  const imo = (lloydsId || "").trim();
+  return /^\d{7}$/.test(imo) ? imo : undefined;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
 
@@ -88,18 +97,6 @@ export async function GET(req: Request) {
   const payload = await resp.json();
   const rows: VesselRow[] = payload?.data || [];
 
-    // DEBUG MODE: inspect what fields exist in the source JSON rows
-  const debug = searchParams.get("debug") === "1";
-  if (debug) {
-    const first = rows[0] || {};
-    return NextResponse.json({
-      rowsCount: rows.length,
-      firstRowKeys: Object.keys(first).sort(),
-      firstRow: first,
-    });
-  }
-
-
   const now = DateTime.now().setZone(TZ);
   const hours = hoursFromWindow(window);
 
@@ -109,6 +106,8 @@ export async function GET(req: Request) {
   const events: VesselEvent[] = [];
 
   for (const row of rows) {
+    const imo = normalizeIMO(row.lloyds_id);
+
     // ARRIVAL: ATA first, else ETA
     const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
     if (arr.dt && arr.timeType && arr.dt >= windowStart && arr.dt <= windowEnd) {
@@ -118,6 +117,7 @@ export async function GET(req: Request) {
         timeLabel: arr.dt.toFormat("M/d/yy h:mm a"),
         timeType: arr.timeType,
         vesselName: row.name || "Unknown",
+        imo,
         service: row.service,
         operator: row.vsl_operator,
         berth: row.berth,
@@ -125,7 +125,7 @@ export async function GET(req: Request) {
       });
     }
 
-    // DEPARTURE: ATD first, else ETD ok
+    // DEPARTURE: ATD first, else ETD
     const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
     if (dep.dt && dep.timeType && dep.dt >= windowStart && dep.dt <= windowEnd) {
       events.push({
@@ -134,6 +134,7 @@ export async function GET(req: Request) {
         timeLabel: dep.dt.toFormat("M/d/yy h:mm a"),
         timeType: dep.timeType,
         vesselName: row.name || "Unknown",
+        imo,
         service: row.service,
         operator: row.vsl_operator,
         berth: row.berth,
