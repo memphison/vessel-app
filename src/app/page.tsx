@@ -6,12 +6,14 @@ type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE";
   timeISO: string;
   timeLabel: string;
+  timeType: "ACTUAL" | "ESTIMATED";
   vesselName: string;
   service?: string;
   operator?: string;
   berth?: string;
   status?: string;
 };
+
 
 function formatDateTime(iso: string) {
   const d = new Date(iso);
@@ -153,13 +155,27 @@ export default function HomePage() {
                   padding: 16,
                 }}
               >
-                <div
-                  style={{ display: "flex", justifyContent: "space-between" }}
-                >
-                  <strong>{e.type}</strong>
-                  <strong>{formatDateTime(e.timeISO)}</strong>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+  <strong>{e.type}</strong>
 
-                </div>
+  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+    <span
+      style={{
+        fontSize: 12,
+        padding: "2px 6px",
+        borderRadius: 6,
+        background: e.timeType === "ACTUAL" ? "#e6f4ea" : "#f3f3f3",
+        color: e.timeType === "ACTUAL" ? "#137333" : "#555",
+        fontWeight: 600,
+      }}
+    >
+      {e.timeType}
+    </span>
+
+    <strong>{formatDateTime(e.timeISO)}</strong>
+  </div>
+</div>
+
 
                 <div style={{ marginTop: 6, fontSize: 18 }}>
                   {e.vesselName}
