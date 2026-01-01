@@ -12,16 +12,25 @@ type VesselRow = {
   vsl_operator?: string;
   berth?: string;
   status?: string;
+
+  // Estimated times
   eta_date?: string;
   eta_time?: string;
   etd_date?: string;
   etd_time?: string;
+
+  // Actual times (when available)
+  ata_date?: string;
+  ata_time?: string;
+  atd_date?: string;
+  atd_time?: string;
 };
 
 type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE";
   timeISO: string;
-  timeLabel: string;
+  timeLabel: string; // M/D/YY h:mm AM/PM
+  timeType: "ACTUAL" | "ESTIMATED";
   vesselName: string;
   service?: string;
   operator?: string;
@@ -41,6 +50,21 @@ function parseDT(dateStr?: string, timeStr?: string): DateTime | null {
   return dt.isValid ? dt : null;
 }
 
+// Prefer actual date/time when valid; otherwise fall back to estimated.
+function bestDT(
+  actualDate?: string,
+  actualTime?: string,
+  estDate?: string,
+  estTime?: string
+): { dt: DateTime | null; timeType: "ACTUAL" | "ESTIMATED" | null } {
+  const actual = parseDT(actualDate, actualTime);
+  if (actual) return { dt: actual, timeType: "ACTUAL" };
+
+  const estimated = parseDT(estDate, estTime);
+  if (estimated) return { dt: estimated, timeType: "ESTIMATED" };
+
+  return { dt: null, timeType: null };
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -63,8 +87,8 @@ export async function GET(req: Request) {
   let windowEnd: DateTime;
   if (window === "3h") {
     windowEnd = now.plus({ hours: 3 });
-  } else if (window === "today") {
-    windowEnd = now.endOf("day");
+  } else if (window === "24h") {
+    windowEnd = now.plus({ hours: 24 });
   } else {
     windowEnd = now.plus({ hours: 1 });
   }
@@ -72,14 +96,15 @@ export async function GET(req: Request) {
   const events: VesselEvent[] = [];
 
   for (const row of rows) {
-    const eta = parseDT(row.eta_date, row.eta_time);
-    const etd = parseDT(row.etd_date, row.etd_time);
+    // ARRIVAL uses ATA first, else ETA ok
+    const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
 
-    if (eta && eta >= now && eta <= windowEnd) {
+    if (arr.dt && arr.timeType && arr.dt >= now && arr.dt <= windowEnd) {
       events.push({
         type: "ARRIVAL",
-        timeISO: eta.toISO()!,
-        timeLabel: eta.toFormat("h:mm a"),
+        timeISO: arr.dt.toISO()!,
+        timeLabel: arr.dt.toFormat("M/d/yy h:mm a"),
+        timeType: arr.timeType,
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -88,11 +113,15 @@ export async function GET(req: Request) {
       });
     }
 
-    if (etd && etd >= now && etd <= windowEnd) {
+    // DEPARTURE uses ATD first, else ETD
+    const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
+
+    if (dep.dt && dep.timeType && dep.dt >= now && dep.dt <= windowEnd) {
       events.push({
         type: "DEPARTURE",
-        timeISO: etd.toISO()!,
-        timeLabel: etd.toFormat("h:mm a"),
+        timeISO: dep.dt.toISO()!,
+        timeLabel: dep.dt.toFormat("M/d/yy h:mm a"),
+        timeType: dep.timeType,
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -108,8 +137,7 @@ export async function GET(req: Request) {
     window,
     now: now.toISO(),
     windowEnd: windowEnd.toISO(),
-    nextFive: events.slice(0, 5),
+    events,
     totalInWindow: events.length,
   });
 }
-
