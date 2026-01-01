@@ -89,7 +89,7 @@ export default function HomePage() {
   const dirLabel = dir === "past" ? "past" : "next";
 
   function select(d: Dir, w: WindowVal) {
-    // If user clicks the currently-selected button again, re-fetch
+    // If user clicks the currently-selected button again, re-fetch ok
     if (d === dir && w === window) {
       load(d, w);
       return;

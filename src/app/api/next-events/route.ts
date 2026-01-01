@@ -113,7 +113,7 @@ export async function GET(req: Request) {
       });
     }
 
-    // DEPARTURE: ATD first, else ETD
+    // DEPARTURE: ATD first, else ETD ok
     const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
     if (dep.dt && dep.timeType && dep.dt >= windowStart && dep.dt <= windowEnd) {
       events.push({
