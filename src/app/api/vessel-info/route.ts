@@ -1,5 +1,18 @@
 import { NextResponse } from "next/server";
 
+type VesselInfo = {
+  ok: boolean;
+  imo: string;
+  source: "vesselfinder-html";
+  loa: string | null;
+  beam: string | null;
+  vesselType: string | null;
+  yearBuilt: string | null;
+  grossTonnage: string | null;
+  flag: string | null;
+  note: string;
+};
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const imo = (searchParams.get("imo") || "").trim();
@@ -11,27 +24,17 @@ export async function GET(req: Request) {
     );
   }
 
-  // NOTE: This is a best-effort HTML scrape of a public page.
-  // Some sites may block automated requests. For production, use an AIS/data provider API.
+  // Public vessel particulars page by IMO (dimensions and particulars often available)
   const url = `https://www.vesselfinder.com/vessels/details/${imo}`;
 
-  let resp: Response;
-  try {
-    resp = await fetch(url, {
-      headers: {
-        // Helps avoid simple bot blocks
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      cache: "no-store",
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to fetch vessel page (network error)." },
-      { status: 502 }
-    );
-  }
+  const resp = await fetch(url, {
+    headers: {
+      // Helps avoid simple bot blocks
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    },
+    cache: "no-store",
+  });
 
   if (!resp.ok) {
     return NextResponse.json(
@@ -42,27 +45,46 @@ export async function GET(req: Request) {
 
   const html = await resp.text();
 
-  // Very lightweight parsing: look for "Length Overall" and "Beam"
+  // Lightweight parsing: look for a table row that contains a label and then a value cell.
   function pick(label: string) {
-    // Matches: Label ... </td><td>VALUE</td>
+    const safe = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp(
-      `${label}[\s\S]{0,400}?</td>\s*<td[^>]*>\s*([^<]+)\s*<`,
+      `${safe}[\s\S]{0,260}?</td>\s*<td[^>]*>\s*([^<]+)\s*<`,
       "i"
     );
     const m = html.match(re);
     return m ? m[1].trim() : null;
   }
 
-  const loa = pick("Length Overall");
-  const beam = pick("Beam");
+  function pickAny(labels: string[]) {
+    for (const l of labels) {
+      const v = pick(l);
+      if (v) return v;
+    }
+    return null;
+  }
 
-  return NextResponse.json({
+  const loa = pickAny(["Length Overall", "LOA"]);
+  const beam = pickAny(["Beam"]);
+
+  const vesselType = pickAny(["Vessel type", "Vessel Type", "Type"]);
+  const yearBuilt = pickAny(["Year Built", "Built"]);
+  const grossTonnage = pickAny(["Gross Tonnage", "Gross tonnage", "GT"]);
+  const flag = pickAny(["Flag"]);
+
+  const payload: VesselInfo = {
     ok: true,
     imo,
     source: "vesselfinder-html",
     loa,
     beam,
+    vesselType,
+    yearBuilt,
+    grossTonnage,
+    flag,
     note:
-      "Dimensions only from a public page. Live position will require an AIS provider or API.",
-  });
+      "This is static vessel particulars scraped from a public page. Live position requires an AIS provider/API.",
+  };
+
+  return NextResponse.json(payload);
 }

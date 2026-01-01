@@ -20,6 +20,10 @@ type VesselInfo = {
   imo: string;
   loa: string | null;
   beam: string | null;
+  vesselType: string | null;
+  yearBuilt: string | null;
+  grossTonnage: string | null;
+  flag: string | null;
   source?: string;
 };
 
@@ -52,7 +56,6 @@ export default function HomePage() {
   const [dir, setDir] = useState<Dir>("next");
   const [timeWindow, setTimeWindow] = useState<Window>("24h");
 
-  // Dark mode tracking
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -128,7 +131,6 @@ export default function HomePage() {
     }
   }
 
-  // Fetch vessel dimensions for any IMOs we have not fetched yet.
   function loadVesselInfos(currentEvents: VesselEvent[]) {
     const uniqueImos = Array.from(
       new Set(
@@ -159,7 +161,7 @@ export default function HomePage() {
           }
         })
         .catch(() => {
-          // silent fail
+          // Silent fail
         });
 
       return prev;
@@ -287,11 +289,25 @@ export default function HomePage() {
           <div style={{ display: "grid", gap: 12 }}>
             {events.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
+
               const dims =
                 info && (info.loa || info.beam)
                   ? `${info.loa ? `LOA ${info.loa}` : ""}${
                       info.loa && info.beam ? " • " : ""
                     }${info.beam ? `Beam ${info.beam}` : ""}`
+                  : null;
+
+              const particulars =
+                info && (info.vesselType || info.yearBuilt || info.flag || info.grossTonnage)
+                  ? `${info.vesselType || ""}${
+                      info.vesselType && info.yearBuilt ? " • " : ""
+                    }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
+                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
+                    }${info.flag ? `Flag ${info.flag}` : ""}${
+                      (info.vesselType || info.yearBuilt || info.flag) && info.grossTonnage
+                        ? " • "
+                        : ""
+                    }${info.grossTonnage ? `GT ${info.grossTonnage}` : ""}`.trim()
                   : null;
 
               return (
@@ -356,15 +372,21 @@ export default function HomePage() {
                     {e.imo && <span> • IMO {e.imo}</span>}
                   </div>
 
-                  {e.imo && !dims && (
+                  {e.imo && !info && (
                     <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>
-                      Loading dimensions…
+                      Loading vessel details…
                     </div>
                   )}
 
                   {dims && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                       {dims}
+                    </div>
+                  )}
+
+                  {particulars && (
+                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
+                      {particulars}
                     </div>
                   )}
                 </div>
