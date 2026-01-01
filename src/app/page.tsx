@@ -304,11 +304,10 @@ export default function HomePage() {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
              const dims =
-               info && (info.loa || info.beam)
-                ? `${info.loa ? `Length ${info.loa}` : ""}${
-                info.loa && info.beam ? " / " : ""
-                }${info.beam ? `Width ${info.beam}` : ""}`
-              : null;
+  info && (info.loa || info.beam)
+    ? `Dimensions ${[info.loa, info.beam].filter(Boolean).join(" / ")}`
+    : null;
+
 
 
 
