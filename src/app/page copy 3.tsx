@@ -53,39 +53,6 @@ export default function HomePage() {
   const [timeWindow, setTimeWindow] = useState<Window>("24h");
 
 
-const [isDark, setIsDark] = useState(false);
-
-useEffect(() => {
-  if (typeof window === "undefined" || !window.matchMedia) return;
-
-  const mql = window.matchMedia("(prefers-color-scheme: dark)");
-  const onChange = (e: MediaQueryListEvent) => setIsDark(e.matches);
-
-  setIsDark(mql.matches);
-
-  if (typeof mql.addEventListener === "function") {
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }
-
-  // Safari fallback
-  // @ts-ignore
-  mql.addListener(onChange);
-  // @ts-ignore
-  return () => mql.removeListener(onChange);
-}, []);
-
-const theme = {
-  pageText: isDark ? "#f5f5f5" : "#111",
-  subText: isDark ? "rgba(245,245,245,0.75)" : "rgba(0,0,0,0.75)",
-  metaText: isDark ? "rgba(245,245,245,0.82)" : "rgba(0,0,0,0.72)",
-  cardBg: isDark ? "#121212" : "#fff",
-  cardBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
-  emptyBg: isDark ? "#121212" : "#fafafa",
-  emptyBorder: isDark ? "rgba(255,255,255,0.18)" : "#ddd",
-};
-
-
   // IMO -> vessel info cache (client-side)
   const [infoByImo, setInfoByImo] = useState<Record<string, VesselInfo>>({});
 
@@ -100,6 +67,8 @@ const theme = {
 }, [dir, timeWindow]);
 
 
+  // Cards are white in dark mode, so use a readable dark text color.
+  const metaTextColor = "rgba(0,0,0,0.72)";
 
   async function load(d: Dir = dir, w: Window = timeWindow) {
     setLoading(true);
@@ -198,20 +167,18 @@ const theme = {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>Savannah Vessel Watch</h1>
+      <h1 style={{ margin: 0 }}>Savannah Vessel Watch</h1>
+      <p style={{ marginTop: 8, opacity: 0.75 }}>
+        All arrivals or departures in the {windowLabel}. Refreshes every minute.
+      </p>
 
-<p style={{ marginTop: 8, color: theme.subText }}>
-  All arrivals or departures in the {windowLabel}. Refreshes every minute.
-</p>
+      <div style={{ marginTop: 8, opacity: 0.6, fontSize: 14 }}>
+        {lastUpdated ? `Last updated: ${lastUpdated}` : "Last updated: —"}
+      </div>
 
-<div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
-  {lastUpdated ? `Last updated: ${lastUpdated}` : "Last updated: —"}
-</div>
-
-<div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-  {events.length} total moves in the {windowLabel}.
-</div>
-
+      <div style={{ marginTop: 6, opacity: 0.6, fontSize: 14 }}>
+        {events.length} total moves in the {windowLabel}.
+      </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
         {nextButtons.map(({ w, label }) => {
@@ -244,7 +211,7 @@ const theme = {
                 if (active) load("past", w);
                 else {
                   setDir("past");
-                  setTimeWindow(w);
+                  setTimeWindow(w as WindowNext);
                 }
               }}
               style={buttonStyle(active)}
@@ -256,30 +223,26 @@ const theme = {
       </div>
 
       <div style={{ marginTop: 16 }}>
-        {loading && <p style={{ color: theme.pageText }}>Loading...</p>}
-
+        {loading && <p>Loading...</p>}
 
         {!loading && error && (
           <p style={{ color: "crimson" }}>{error} Try refreshing the page.</p>
         )}
 
         {!loading && !error && events.length === 0 && (
-         <div
-  style={{
-    border: `1px solid ${theme.emptyBorder}`,
-    borderRadius: 12,
-    padding: 16,
-    background: theme.emptyBg,
-    color: theme.pageText,
-  }}
->
-  <strong>No moves in the {windowLabel}.</strong>
-  <div style={{ marginTop: 6, color: theme.subText }}>
-    Try a different time window.
-  </div>
-</div>
-
-
+          <div
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 12,
+              padding: 16,
+              background: "#fafafa",
+            }}
+          >
+            <strong>No moves in the {windowLabel}.</strong>
+            <div style={{ marginTop: 6, opacity: 0.8 }}>
+              Try a different time window.
+            </div>
+          </div>
         )}
 
         {!loading && !error && events.length > 0 && (
@@ -294,17 +257,15 @@ const theme = {
                   : null;
 
               return (
-               <div
-  key={`${e.type}-${e.timeISO}-${i}`}
-  style={{
-    border: `1px solid ${theme.cardBorder}`,
-    borderRadius: 12,
-    padding: 16,
-    background: theme.cardBg,
-    color: theme.pageText,
-  }}
->
-
+                <div
+                  key={`${e.type}-${e.timeISO}-${i}`}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 12,
+                    padding: 16,
+                    background: "#fff",
+                  }}
+                >
                   <div
                     style={{
                       display: "flex",
@@ -336,8 +297,7 @@ const theme = {
 
                   <div style={{ marginTop: 6, fontSize: 18 }}>{e.vesselName}</div>
 
-                  <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-
+                  <div style={{ marginTop: 6, color: metaTextColor, fontSize: 14 }}>
                     {e.operator && <span>{e.operator}</span>}
                     {e.service && <span> • {e.service}</span>}
                     {e.berth && <span> • Berth {e.berth}</span>}
@@ -346,9 +306,9 @@ const theme = {
                   </div>
 
                   {dims && (
-                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-  {dims}
-</div>
+                    <div style={{ marginTop: 6, color: metaTextColor, fontSize: 14 }}>
+                      {dims}
+                    </div>
                   )}
                 </div>
               );
