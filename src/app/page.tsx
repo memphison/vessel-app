@@ -304,11 +304,12 @@ export default function HomePage() {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
               const dims =
-                info && (info.loa || info.beam)
-                  ? `${info.loa ? `LOA ${info.loa}` : ""}${
-                      info.loa && info.beam ? " • " : ""
-                    }${info.beam ? `Beam ${info.beam}` : ""}`
-                  : null;
+  info && (info.loa || info.beam)
+    ? `${info.loa ? `Length ${String(info.loa).replace(/[^\d.]/g, "")}m` : ""}${
+        info.loa && info.beam ? " / " : ""
+      }${info.beam ? `Width ${String(info.beam).replace(/[^\d.]/g, "")}m` : ""}`
+    : null;
+
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
