@@ -29,7 +29,7 @@ type VesselRow = {
 type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE";
   timeISO: string;
-  timeLabel: string;
+  timeLabel: string; // M/D/YY h:mm AM/PM
   timeType: "ACTUAL" | "ESTIMATED";
   vesselName: string;
   service?: string;
@@ -37,7 +37,6 @@ type VesselEvent = {
   berth?: string;
   status?: string;
 };
-
 
 function parseDT(dateStr?: string, timeStr?: string): DateTime | null {
   const d = (dateStr || "").trim();
@@ -51,7 +50,7 @@ function parseDT(dateStr?: string, timeStr?: string): DateTime | null {
   return dt.isValid ? dt : null;
 }
 
-// Prefer actual date/time when fully present and valid; otherwise fall back to estimated.
+// Prefer actual date/time when valid; otherwise fall back to estimated.
 function bestDT(
   actualDate?: string,
   actualTime?: string,
@@ -66,7 +65,6 @@ function bestDT(
 
   return { dt: null, timeType: null };
 }
-
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -98,16 +96,15 @@ export async function GET(req: Request) {
   const events: VesselEvent[] = [];
 
   for (const row of rows) {
-    // Use actual times when available, otherwise estimated.
+    // ARRIVAL uses ATA first, else ETA
     const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
-    const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
 
-    if (arr.dt && arr.dt >= now && arr.dt <= windowEnd) {
+    if (arr.dt && arr.timeType && arr.dt >= now && arr.dt <= windowEnd) {
       events.push({
         type: "ARRIVAL",
         timeISO: arr.dt.toISO()!,
-        timeLabel: arr.dt.toFormat("h:mm a"),
-        timeType: arr.timeType!,
+        timeLabel: arr.dt.toFormat("M/d/yy h:mm a"),
+        timeType: arr.timeType,
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -116,12 +113,15 @@ export async function GET(req: Request) {
       });
     }
 
-    if (dep.dt && dep.dt >= now && dep.dt <= windowEnd) {
+    // DEPARTURE uses ATD first, else ETD
+    const dep = bestDT(row.atd_date, row.atd_time, row.etd_date, row.etd_time);
+
+    if (dep.dt && dep.timeType && dep.dt >= now && dep.dt <= windowEnd) {
       events.push({
         type: "DEPARTURE",
         timeISO: dep.dt.toISO()!,
-        timeLabel: dep.dt.toFormat("h:mm a"),
-        timeType: dep.timeType!,
+        timeLabel: dep.dt.toFormat("M/d/yy h:mm a"),
+        timeType: dep.timeType,
         vesselName: row.name || "Unknown",
         service: row.service,
         operator: row.vsl_operator,
@@ -129,7 +129,7 @@ export async function GET(req: Request) {
         status: row.status,
       });
     }
-  } // <-- MISSING CLOSING BRACE HERE
+  }
 
   events.sort((a, b) => (a.timeISO < b.timeISO ? -1 : 1));
 
