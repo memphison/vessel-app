@@ -14,7 +14,6 @@ type VesselEvent = {
   status?: string;
 };
 
-
 function formatDateTime(iso: string) {
   const d = new Date(iso);
 
@@ -29,7 +28,6 @@ function formatDateTime(iso: string) {
 
   return `${date} • ${time}`;
 }
-
 
 export default function HomePage() {
   const [events, setEvents] = useState<VesselEvent[]>([]);
@@ -98,7 +96,7 @@ export default function HomePage() {
             key={w}
             onClick={() => {
               if (w === window) {
-                load(w); // re-fetch if user clicks the same button again
+                load(w);
               } else {
                 setWindow(w);
               }
@@ -135,10 +133,11 @@ export default function HomePage() {
               borderRadius: 12,
               padding: 16,
               background: "#fafafa",
+              color: "#111",
             }}
           >
             <strong>No moves in the {windowLabel}.</strong>
-            <div style={{ marginTop: 6, opacity: 0.8 }}>
+            <div style={{ marginTop: 6, color: "#555" }}>
               Try a shorter or longer window.
             </div>
           </div>
@@ -153,35 +152,41 @@ export default function HomePage() {
                   border: "1px solid #ddd",
                   borderRadius: 12,
                   padding: 16,
+                  background: "#fff",
+                  color: "#111",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-  <strong>{e.type}</strong>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <strong>{e.type}</strong>
 
-  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-    <span
-      style={{
-        fontSize: 12,
-        padding: "2px 6px",
-        borderRadius: 6,
-        background: e.timeType === "ACTUAL" ? "#e6f4ea" : "#f3f3f3",
-        color: e.timeType === "ACTUAL" ? "#137333" : "#555",
-        fontWeight: 600,
-      }}
-    >
-      {e.timeType}
-    </span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        padding: "2px 6px",
+                        borderRadius: 6,
+                        background:
+                          e.timeType === "ACTUAL" ? "#e6f4ea" : "#f3f3f3",
+                        color: e.timeType === "ACTUAL" ? "#137333" : "#555",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {e.timeType === "ACTUAL" ? "Actual" : "Estimated"}
+                    </span>
 
-    <strong>{formatDateTime(e.timeISO)}</strong>
-  </div>
-</div>
-
-
-                <div style={{ marginTop: 6, fontSize: 18 }}>
-                  {e.vesselName}
+                    <strong>{formatDateTime(e.timeISO)}</strong>
+                  </div>
                 </div>
 
-                <div style={{ marginTop: 6, opacity: 0.8 }}>
+                <div style={{ marginTop: 6, fontSize: 18 }}>{e.vesselName}</div>
+
+                <div style={{ marginTop: 6, color: "#555" }}>
                   {e.operator && <span>{e.operator}</span>}
                   {e.service && <span> • {e.service}</span>}
                   {e.berth && <span> • Berth {e.berth}</span>}
