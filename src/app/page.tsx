@@ -18,8 +18,13 @@ type VesselEvent = {
 type VesselInfo = {
   ok: boolean;
   imo: string;
-  loa: string | null;
-  beam: string | null;
+
+  // Dimensions (we now prefer lengthM/widthM, but keep loa/beam for back-compat)
+  lengthM?: string | null;
+  widthM?: string | null;
+  loa?: string | null;
+  beam?: string | null;
+
   vesselType: string | null;
   yearBuilt: string | null;
   grossTonnage: string | null;
@@ -47,18 +52,64 @@ function formatDateTime(iso: string) {
   return `${date} • ${time}`;
 }
 
-function formatNumber(n?: string | null) {
-  if (!n) return null;
-  const num = Number(n.replace(/[^\d]/g, ""));
-  return Number.isFinite(num) ? num.toLocaleString() : null;
-}
-
 function formatGrossTonnage(gt?: string | null) {
   if (!gt) return null;
-  const num = Number(gt.replace(/[^\d]/g, ""));
+  const num = Number(String(gt).replace(/[^\d]/g, ""));
   return Number.isFinite(num) ? num.toLocaleString() : null;
 }
 
+// Returns up to two meter values in order, e.g. "262 / 32 m" -> ["262m","32m"]
+function metersPair(v?: string | null): string[] {
+  if (!v) return [];
+  const nums = String(v).match(/\d+(?:\.\d+)?/g) || [];
+  const out = nums.slice(0, 2).map((n) => `${n}m`);
+  return out;
+}
+
+function getLengthWidth(info?: VesselInfo) {
+  if (!info) return { length: null as string | null, width: null as string | null };
+
+  // Prefer explicit keys from the API
+  let length = info.lengthM ?? null;
+  let width = info.widthM ?? null;
+
+  // Fall back to older keys if needed
+  if (!length && info.loa) length = info.loa;
+  if (!width && info.beam) width = info.beam;
+
+  // If one field contains BOTH numbers (e.g., "262 / 32 m"), split it.
+  if (length && !width) {
+    const pair = metersPair(length);
+    if (pair.length === 2) {
+      length = pair[0];
+      width = pair[1];
+    } else if (pair.length === 1) {
+      length = pair[0];
+    }
+  }
+
+  if (width && !length) {
+    const pair = metersPair(width);
+    if (pair.length === 2) {
+      length = pair[0];
+      width = pair[1];
+    } else if (pair.length === 1) {
+      width = pair[0];
+    }
+  }
+
+  // Normalize single values to "###m" if they aren't already (rare)
+  if (length) {
+    const p = metersPair(length);
+    if (p.length >= 1) length = p[0];
+  }
+  if (width) {
+    const p = metersPair(width);
+    if (p.length >= 1) width = p[0];
+  }
+
+  return { length, width };
+}
 
 export default function HomePage() {
   const [events, setEvents] = useState<VesselEvent[]>([]);
@@ -218,7 +269,7 @@ export default function HomePage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>Savannah Vessel Watch</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         All arrivals or departures in the {windowLabel}. Refreshes every minute.
@@ -303,29 +354,30 @@ export default function HomePage() {
             {events.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
-             const dims =
-  info && (info.loa || info.beam)
-    ? `Dimensions ${[info.loa, info.beam].filter(Boolean).join(" / ")}`
-    : null;
-
-
-
+              const { length, width } = getLengthWidth(info);
+              const dims =
+                length || width
+                  ? `${length ? `Length ${length}` : ""}${
+                      length && width ? " / " : ""
+                    }${width ? `Width ${width}` : ""}`
+                  : null;
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
-const particulars =
-  info &&
-  (info.vesselType || info.yearBuilt || info.flag || formattedGT)
-    ? `${info.vesselType || ""}${
-        info.vesselType && info.yearBuilt ? " • " : ""
-      }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
-        (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-      }${info.flag ? `Flag ${info.flag}` : ""}${
-        (info.vesselType || info.yearBuilt || info.flag) && formattedGT
-          ? " • "
-          : ""
-      }${formattedGT ? `Gross Tonnage ${formattedGT}` : ""}`.trim()
-    : null;
+              const particulars =
+                info && (info.vesselType || info.yearBuilt || info.flag || formattedGT)
+                  ? `${info.vesselType || ""}${
+                      info.vesselType && info.yearBuilt ? " • " : ""
+                    }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
+                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
+                    }${info.flag ? `Flag ${info.flag}` : ""}${
+                      (info.vesselType || info.yearBuilt || info.flag) && formattedGT
+                        ? " • "
+                        : ""
+                    }${
+                      formattedGT ? `Gross Tonnage ${formattedGT}` : ""
+                    }`.trim()
+                  : null;
 
               return (
                 <div
