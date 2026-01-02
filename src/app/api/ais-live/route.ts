@@ -109,77 +109,88 @@ async function connectIfNeeded() {
     ws.send(JSON.stringify(sub));
   });
 
-  ws.addEventListener("message", (evt) => {
-    try {
-      const raw = typeof evt.data === "string" ? evt.data : "";
-      if (!raw) return;
+ ws.addEventListener("message", async (evt: any) => {
+  try {
+    let raw = "";
 
-      const parsed = JSON.parse(raw);
-      store.lastMessageISO = new Date().toISOString();
-
-      // AISStream sometimes sends errors as { error: "..."} (no MessageType)
-      if (parsed?.error) {
-        store.lastError = String(parsed.error);
-        return;
-      }
-
-      const messageType: string | undefined = parsed?.MessageType;
-      const msg = parsed?.Message;
-      const meta = parsed?.MetaData;
-
-      if (!messageType || !msg) return;
-
-      if (messageType === "PositionReport") {
-        // Lat/Lon are commonly in MetaData as lowercase
-        const lat = pickNumber(meta?.latitude, meta?.Latitude, msg?.Latitude, msg?.latitude);
-        const lon = pickNumber(meta?.longitude, meta?.Longitude, msg?.Longitude, msg?.longitude);
-        if (lat == null || lon == null) return;
-
-        // PositionReport payload is commonly nested
-        const pr =
-          msg?.PositionReport ||
-          msg?.PositionReportClassA ||
-          msg?.PositionReportClassB ||
-          msg;
-
-        const mmsi = pickString(meta?.MMSI, pr?.MMSI, pr?.UserID, pr?.userid);
-        const imo = normalizeImo(pickString(pr?.IMONumber, pr?.ImoNumber, pr?.IMO, pr?.imo));
-
-        const keyId = imo ? `IMO:${imo}` : mmsi ? `MMSI:${mmsi}` : null;
-        if (!keyId) return;
-
-        const prev = store.positionsByKey.get(keyId);
-
-        const sog = pickNumber(pr?.Sog, pr?.SOG, pr?.SpeedOverGround);
-        const cog = pickNumber(pr?.Cog, pr?.COG, pr?.CourseOverGround);
-
-        store.positionsByKey.set(keyId, {
-          imo,
-          mmsi,
-          lat,
-          lon,
-          sog: sog ?? prev?.sog,
-          cog: cog ?? prev?.cog,
-          lastSeenISO: new Date().toISOString(),
-        });
-      }
-
-      if (messageType === "ShipStaticData") {
-        // Useful for linking MMSI->IMO sometimes
-        const ssd = msg?.ShipStaticData || msg;
-        const mmsi = pickString(meta?.MMSI, ssd?.MMSI, ssd?.UserID);
-        const imo = normalizeImo(pickString(ssd?.IMONumber, ssd?.ImoNumber, ssd?.IMO));
-
-        if (!mmsi || !imo) return;
-
-        const mmsiKey = `MMSI:${mmsi}`;
-        const rec = store.positionsByKey.get(mmsiKey);
-        if (rec) store.positionsByKey.set(`IMO:${imo}`, { ...rec, imo, mmsi });
-      }
-    } catch {
-      // ignore parse errors
+    // In Node, evt.data is often a Buffer or ArrayBuffer, not a string
+    if (typeof evt.data === "string") {
+      raw = evt.data;
+    } else if (evt.data instanceof ArrayBuffer) {
+      raw = Buffer.from(evt.data).toString("utf8");
+    } else if (Buffer.isBuffer(evt.data)) {
+      raw = evt.data.toString("utf8");
+    } else if (evt.data?.arrayBuffer) {
+      // Some runtimes give a Blob-like object
+      const ab = await evt.data.arrayBuffer();
+      raw = Buffer.from(ab).toString("utf8");
+    } else {
+      return;
     }
-  });
+
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    store.lastMessageISO = new Date().toISOString();
+
+    if (parsed?.error) {
+      store.lastError = String(parsed.error);
+      return;
+    }
+
+    const messageType: string | undefined = parsed?.MessageType;
+    const msg = parsed?.Message;
+    const meta = parsed?.MetaData;
+    if (!messageType || !msg) return;
+
+    if (messageType === "PositionReport") {
+      const lat = pickNumber(meta?.latitude, meta?.Latitude, msg?.Latitude, msg?.latitude);
+      const lon = pickNumber(meta?.longitude, meta?.Longitude, msg?.Longitude, msg?.longitude);
+      if (lat == null || lon == null) return;
+
+      const pr =
+        msg?.PositionReport ||
+        msg?.PositionReportClassA ||
+        msg?.PositionReportClassB ||
+        msg;
+
+      const mmsi = pickString(meta?.MMSI, pr?.MMSI, pr?.UserID, pr?.userid);
+      const imo = normalizeImo(pickString(pr?.IMONumber, pr?.ImoNumber, pr?.IMO, pr?.imo));
+
+      const keyId = imo ? `IMO:${imo}` : mmsi ? `MMSI:${mmsi}` : null;
+      if (!keyId) return;
+
+      const prev = store.positionsByKey.get(keyId);
+
+      const sog = pickNumber(pr?.Sog, pr?.SOG, pr?.SpeedOverGround);
+      const cog = pickNumber(pr?.Cog, pr?.COG, pr?.CourseOverGround);
+
+      store.positionsByKey.set(keyId, {
+        imo,
+        mmsi,
+        lat,
+        lon,
+        sog: sog ?? prev?.sog,
+        cog: cog ?? prev?.cog,
+        lastSeenISO: new Date().toISOString(),
+      });
+    }
+
+    if (messageType === "ShipStaticData") {
+      const ssd = msg?.ShipStaticData || msg;
+      const mmsi = pickString(meta?.MMSI, ssd?.MMSI, ssd?.UserID);
+      const imo = normalizeImo(pickString(ssd?.IMONumber, ssd?.ImoNumber, ssd?.IMO));
+      if (!mmsi || !imo) return;
+
+      const mmsiKey = `MMSI:${mmsi}`;
+      const rec = store.positionsByKey.get(mmsiKey);
+      if (rec) store.positionsByKey.set(`IMO:${imo}`, { ...rec, imo, mmsi });
+    }
+  } catch {
+    // ignore
+  }
+});
+
 
   ws.addEventListener("close", () => {
     store.ws = null;
