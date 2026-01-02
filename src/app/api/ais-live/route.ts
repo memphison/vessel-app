@@ -5,14 +5,28 @@ export const runtime = "nodejs"; // required (WebSocket not supported in Edge)
 // City Hall, Savannah (hard-coded anchor point for now)
 const CITY_HALL = { lat: 32.08077, lon: -81.0903 };
 
+// TEMP: flip to true to test against a busy AIS area (NY Harbor)
+const TEST_BUSY_AREA = true;
+
+
 // Bounding box (lat, lon) pairs inside a list of boxes:
 // [ [ [minLat, minLon], [maxLat, maxLon] ] ]
-const BBOX: Array<[[number, number], [number, number]]> = [
-  [
-    [31.35613231884058, -81.94553130944576], // south-west
-    [32.80540768115942, -80.23506869055424], // north-east
-  ],
-];
+const BBOX = TEST_BUSY_AREA
+  ? [
+      [
+        [40.45, -74.35], // NY Harbor SW
+        [40.95, -73.60], // NY Harbor NE
+      ],
+    ]
+  : [
+      [
+        [31.35613231884058, -81.94553130944576], // Savannah SW
+        [32.80540768115942, -80.23506869055424], // Savannah NE
+      ],
+    ];
+
+
+
 
 type AisPosition = {
   imo?: string;
@@ -90,7 +104,14 @@ function normalizeImo(imo?: string) {
 
 async function connectIfNeeded() {
   const store = ensureStore();
-  if (store.ws) return;
+  if (store.ws && store.ws.readyState === WebSocket.OPEN) return;
+
+// if exists but not open, clear it so we reconnect
+if (store.ws && store.ws.readyState !== WebSocket.OPEN) {
+  try { store.ws.close(); } catch {}
+  store.ws = null;
+}
+
 
   const key = process.env.AISSTREAM_API_KEY;
   if (!key) throw new Error("Missing AISSTREAM_API_KEY in environment.");
