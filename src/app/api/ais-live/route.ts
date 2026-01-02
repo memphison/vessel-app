@@ -2,27 +2,27 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs"; // required (WebSocket not supported in Edge)
 
-// City Hall, Savannah (approx)
+// City Hall, Savannah (hard-coded anchor point for now)
 const CITY_HALL = { lat: 32.08077, lon: -81.0903 };
 
-// Default radius for the bbox query (miles). Increase if count stays 0.
-const DEFAULT_RADIUS_MI = 50;
-
-// Drop position entries not updated in this many minutes
-const STALE_MINUTES = 30;
+// Bounding box (lat, lon) pairs inside a list of boxes:
+// [ [ [minLat, minLon], [maxLat, maxLon] ] ]
+const BBOX: Array<[[number, number], [number, number]]> = [
+  [
+    [31.35613231884058, -81.94553130944576], // south-west
+    [32.80540768115942, -80.23506869055424], // north-east
+  ],
+];
 
 type AisPosition = {
   imo?: string;
   mmsi?: string;
   lat: number;
   lon: number;
-  sog?: number; // speed over ground (knots)
-  cog?: number; // course over ground (degrees)
+  sog?: number; // knots
+  cog?: number; // degrees
   lastSeenISO: string;
 };
-
-type BoundingBoxes = number[][][];
-
 
 type SnapshotRow = AisPosition & {
   distanceMi: number;
@@ -34,6 +34,8 @@ declare global {
     | {
         ws: WebSocket | null;
         lastConnectISO: string | null;
+        lastMessageISO: string | null;
+        lastError: string | null;
         positionsByKey: Map<string, AisPosition>;
       }
     | undefined;
@@ -41,7 +43,7 @@ declare global {
 
 function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
   const toRad = (v: number) => (v * Math.PI) / 180;
-  const R = 3958.7613; // Earth radius miles
+  const R = 3958.7613; // miles
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
@@ -51,76 +53,60 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) 
   return R * c;
 }
 
-/**
- * Build a loose bounding box around City Hall for AISStream.
- * We convert miles -> degrees using rough approximations:
- * - 1 degree latitude ~= 69 miles
- * - 1 degree longitude ~= 69 * cos(latitude) miles
- */
-function buildBoundingBoxes(radiusMi: number): BoundingBoxes {
-  const latPerMi = 1 / 69;
-  const lonPerMi = 1 / (69 * Math.cos((CITY_HALL.lat * Math.PI) / 180));
-
-  const latDelta = radiusMi * latPerMi;
-  const lonDelta = radiusMi * lonPerMi;
-
-  const minLat = CITY_HALL.lat - latDelta;
-  const maxLat = CITY_HALL.lat + latDelta;
-  const minLon = CITY_HALL.lon - lonDelta;
-  const maxLon = CITY_HALL.lon + lonDelta;
-
-  // AISStream expects: [ [ [minLat, minLon], [maxLat, maxLon] ] ]
-  return [[[minLat, minLon], [maxLat, maxLon]]];
-}
-
-
 function ensureStore() {
   if (!globalThis.__AISSTREAM__) {
     globalThis.__AISSTREAM__ = {
       ws: null,
       lastConnectISO: null,
+      lastMessageISO: null,
+      lastError: null,
       positionsByKey: new Map<string, AisPosition>(),
     };
   }
   return globalThis.__AISSTREAM__!;
 }
 
-function cleanupStale(store: NonNullable<typeof globalThis.__AISSTREAM__>) {
-  const cutoff = Date.now() - STALE_MINUTES * 60_000;
-  for (const [k, v] of store.positionsByKey.entries()) {
-    const t = Date.parse(v.lastSeenISO);
-    if (!Number.isFinite(t) || t < cutoff) store.positionsByKey.delete(k);
+function pickNumber(...vals: any[]): number | null {
+  for (const v of vals) {
+    const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
+    if (Number.isFinite(n)) return n;
   }
+  return null;
 }
 
-async function connectIfNeeded(bboxToUse: BoundingBoxes) {
-
-  const store = ensureStore();
-
-  // If we already have a live socket, keep it.
-  if (store.ws && store.ws.readyState === WebSocket.OPEN) return;
-
-  // If it exists but is CLOSED/CLOSING, drop it and recreate.
-  if (store.ws && store.ws.readyState !== WebSocket.CONNECTING) {
-    store.ws = null;
+function pickString(...vals: any[]): string | undefined {
+  for (const v of vals) {
+    const s = v == null ? "" : String(v).trim();
+    if (s) return s;
   }
+  return undefined;
+}
+
+function normalizeImo(imo?: string) {
+  if (!imo) return undefined;
+  const cleaned = imo.replace(/[^\d]/g, "").trim();
+  return /^\d{7}$/.test(cleaned) ? cleaned : undefined;
+}
+
+async function connectIfNeeded() {
+  const store = ensureStore();
+  if (store.ws) return;
 
   const key = process.env.AISSTREAM_API_KEY;
-  if (!key) {
-    throw new Error("Missing AISSTREAM_API_KEY in environment.");
-  }
+  if (!key) throw new Error("Missing AISSTREAM_API_KEY in environment.");
 
   const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
   store.ws = ws;
   store.lastConnectISO = new Date().toISOString();
+  store.lastError = null;
 
   ws.addEventListener("open", () => {
-    const msg = {
+    const sub = {
       APIKey: key,
-      BoundingBoxes: bboxToUse,
+      BoundingBoxes: BBOX,
       FilterMessageTypes: ["PositionReport", "ShipStaticData"],
     };
-    ws.send(JSON.stringify(msg));
+    ws.send(JSON.stringify(sub));
   });
 
   ws.addEventListener("message", (evt) => {
@@ -129,55 +115,66 @@ async function connectIfNeeded(bboxToUse: BoundingBoxes) {
       if (!raw) return;
 
       const parsed = JSON.parse(raw);
+      store.lastMessageISO = new Date().toISOString();
 
-      // AISStream typically returns an object with MessageType + Message
+      // AISStream sometimes sends errors as { error: "..."} (no MessageType)
+      if (parsed?.error) {
+        store.lastError = String(parsed.error);
+        return;
+      }
+
       const messageType: string | undefined = parsed?.MessageType;
       const msg = parsed?.Message;
+      const meta = parsed?.MetaData;
 
       if (!messageType || !msg) return;
 
       if (messageType === "PositionReport") {
-        const lat = Number(msg?.Latitude);
-        const lon = Number(msg?.Longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        // Lat/Lon are commonly in MetaData as lowercase
+        const lat = pickNumber(meta?.latitude, meta?.Latitude, msg?.Latitude, msg?.latitude);
+        const lon = pickNumber(meta?.longitude, meta?.Longitude, msg?.Longitude, msg?.longitude);
+        if (lat == null || lon == null) return;
 
-        const imo = msg?.IMO ? String(msg.IMO).trim() : undefined;
-        const mmsi = msg?.MMSI ? String(msg.MMSI).trim() : undefined;
+        // PositionReport payload is commonly nested
+        const pr =
+          msg?.PositionReport ||
+          msg?.PositionReportClassA ||
+          msg?.PositionReportClassB ||
+          msg;
 
-        const keyId =
-          imo && /^\d{7}$/.test(imo)
-            ? `IMO:${imo}`
-            : mmsi
-            ? `MMSI:${mmsi}`
-            : null;
+        const mmsi = pickString(meta?.MMSI, pr?.MMSI, pr?.UserID, pr?.userid);
+        const imo = normalizeImo(pickString(pr?.IMONumber, pr?.ImoNumber, pr?.IMO, pr?.imo));
 
+        const keyId = imo ? `IMO:${imo}` : mmsi ? `MMSI:${mmsi}` : null;
         if (!keyId) return;
 
         const prev = store.positionsByKey.get(keyId);
+
+        const sog = pickNumber(pr?.Sog, pr?.SOG, pr?.SpeedOverGround);
+        const cog = pickNumber(pr?.Cog, pr?.COG, pr?.CourseOverGround);
 
         store.positionsByKey.set(keyId, {
           imo,
           mmsi,
           lat,
           lon,
-          sog: msg?.Sog != null ? Number(msg.Sog) : prev?.sog,
-          cog: msg?.Cog != null ? Number(msg.Cog) : prev?.cog,
+          sog: sog ?? prev?.sog,
+          cog: cog ?? prev?.cog,
           lastSeenISO: new Date().toISOString(),
         });
       }
 
       if (messageType === "ShipStaticData") {
-        // Optional: enrich a position record with IMO if a MMSI keyed record exists.
-        const imo = msg?.IMO ? String(msg.IMO).trim() : undefined;
-        const mmsi = msg?.MMSI ? String(msg.MMSI).trim() : undefined;
-        if (!mmsi) return;
+        // Useful for linking MMSI->IMO sometimes
+        const ssd = msg?.ShipStaticData || msg;
+        const mmsi = pickString(meta?.MMSI, ssd?.MMSI, ssd?.UserID);
+        const imo = normalizeImo(pickString(ssd?.IMONumber, ssd?.ImoNumber, ssd?.IMO));
+
+        if (!mmsi || !imo) return;
 
         const mmsiKey = `MMSI:${mmsi}`;
         const rec = store.positionsByKey.get(mmsiKey);
-        if (rec && imo && /^\d{7}$/.test(imo)) {
-          const imoKey = `IMO:${imo}`;
-          store.positionsByKey.set(imoKey, { ...rec, imo, mmsi });
-        }
+        if (rec) store.positionsByKey.set(`IMO:${imo}`, { ...rec, imo, mmsi });
       }
     } catch {
       // ignore parse errors
@@ -185,35 +182,19 @@ async function connectIfNeeded(bboxToUse: BoundingBoxes) {
   });
 
   ws.addEventListener("close", () => {
-    // allow reconnect on next request
     store.ws = null;
   });
 
   ws.addEventListener("error", () => {
-    // allow reconnect on next request
     store.ws = null;
   });
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(req.url);
-
-    // radius in miles (default 50). Try 80 or 120 if you still see count:0.
-    const rParam = Number(searchParams.get("r") || DEFAULT_RADIUS_MI);
-    const radiusMi = Number.isFinite(rParam) && rParam > 0 ? rParam : DEFAULT_RADIUS_MI;
-
-    const limitParam = Number(searchParams.get("limit") || 200);
-    const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(500, limitParam)) : 200;
-
-    const bbox = buildBoundingBoxes(radiusMi);
-
-    await connectIfNeeded(bbox);
-
+    await connectIfNeeded();
     const store = ensureStore();
-    cleanupStale(store);
 
-    // Build snapshot sorted by distance
     const rows: SnapshotRow[] = [];
     for (const v of store.positionsByKey.values()) {
       const distanceMi = haversineMiles(CITY_HALL.lat, CITY_HALL.lon, v.lat, v.lon);
@@ -225,11 +206,13 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       cityHall: CITY_HALL,
-      radiusMi,
-      bbox,
+      bbox: BBOX,
       lastConnectISO: store.lastConnectISO,
+      lastMessageISO: store.lastMessageISO,
+      lastError: store.lastError,
+      wsReadyState: store.ws ? store.ws.readyState : null,
       count: rows.length,
-      vessels: rows.slice(0, limit),
+      vessels: rows.slice(0, 200),
     });
   } catch (e: any) {
     return NextResponse.json(
