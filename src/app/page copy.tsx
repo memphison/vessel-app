@@ -71,6 +71,7 @@ type AisSnapshot = {
   lastConnectISO?: string | null;
 };
 
+
 function formatGrossTonnage(gt?: string | null) {
   if (!gt) return null;
   const num = Number(String(gt).replace(/[^\d]/g, ""));
@@ -142,42 +143,41 @@ export default function HomePage() {
   const [isDark, setIsDark] = useState(false);
 
   const [aisByImo, setAisByImo] = useState<Record<string, AisVessel>>({});
-  const [aisStatus, setAisStatus] = useState<{ lastUpdated: string | null; count: number }>(
-    {
-      lastUpdated: null,
-      count: 0,
+  const [aisStatus, setAisStatus] = useState<{ lastUpdated: string | null; count: number }>({
+  lastUpdated: null,
+  count: 0,
+});
+
+async function loadAis() {
+  try {
+    const resp = await fetch(`/api/ais-live`, { cache: "no-store" });
+    const data: AisSnapshot = await resp.json();
+
+    if (!resp.ok || !data?.ok) return;
+
+    const map: Record<string, AisVessel> = {};
+    for (const v of data.vessels || []) {
+      const imo = (v.imo || "").trim();
+      if (/^\d{7}$/.test(imo)) map[imo] = v;
     }
-  );
 
-  async function loadAis() {
-    try {
-      const resp = await fetch(`/api/ais-live`, { cache: "no-store" });
-      const data: AisSnapshot = await resp.json();
-
-      if (!resp.ok || !data?.ok) return;
-
-      const map: Record<string, AisVessel> = {};
-      for (const v of data.vessels || []) {
-        const imo = (v.imo || "").trim();
-        if (/^\d{7}$/.test(imo)) map[imo] = v;
-      }
-
-      setAisByImo(map);
-      setAisStatus({
-        lastUpdated: new Date().toLocaleTimeString(),
-        count: data.count || 0,
-      });
-    } catch {
-      // silent fail
-    }
+    setAisByImo(map);
+    setAisStatus({
+      lastUpdated: new Date().toLocaleTimeString(),
+      count: data.count || 0,
+    });
+  } catch {
+    // silent fail
   }
+}
 
-  useEffect(() => {
-    loadAis();
-    const id = setInterval(loadAis, 10_000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+useEffect(() => {
+  loadAis();
+  const id = setInterval(loadAis, 10_000);
+  return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -337,9 +337,9 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-        AIS: {aisStatus.count} vessels in range
-        {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
+        AIS: {aisStatus.count} vessels in range{aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
       </div>
+
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
         {events.length} total moves in the {windowLabel}.
@@ -421,24 +421,21 @@ export default function HomePage() {
               const nearNow =
                 ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false; // 1 mile threshold
 
-              const geoLine = ais
-                ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${
-                    ais.sog != null ? ais.sog.toFixed(1) : "—"
-                  } kn • Course ${ais.cog != null ? Math.round(ais.cog) + "°" : "—"}`
-                : null;
-
-              const geoSub = ais
-                ? `Lat ${ais.lat.toFixed(5)} • Lon ${ais.lon.toFixed(5)} • Seen ${new Date(
-                    ais.lastSeenISO
-                  ).toLocaleTimeString()}`
-                : null;
+              const geoLine =
+              ais
+                  ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${ais.sog != null ? ais.sog.toFixed(1) : "—"} kn • Course ${
+                      ais.cog != null ? Math.round(ais.cog) + "°" : "—"
+                    }`
+                  : null;
+              const geoSub =
+               ais ? `Lat ${ais.lat.toFixed(5)} • Lon ${ais.lon.toFixed(5)} • Seen ${new Date(ais.lastSeenISO).toLocaleTimeString()}` : null;
 
               const { length, width } = getLengthWidth(info);
               const dims =
                 length || width
-                  ? `${length ? `Length ${length}` : ""}${length && width ? " / " : ""}${
-                      width ? `Width ${width}` : ""
-                    }`
+                  ? `${length ? `Length ${length}` : ""}${
+                      length && width ? " / " : ""
+                    }${width ? `Width ${width}` : ""}`
                   : null;
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
@@ -453,7 +450,9 @@ export default function HomePage() {
                       (info.vesselType || info.yearBuilt || info.flag) && formattedGT
                         ? " • "
                         : ""
-                    }${formattedGT ? `Gross Tonnage ${formattedGT}` : ""}`.trim()
+                    }${
+                      formattedGT ? `Gross Tonnage ${formattedGT}` : ""
+                    }`.trim()
                   : null;
 
               return (
@@ -517,20 +516,6 @@ export default function HomePage() {
                     {e.status && <span> • {e.status}</span>}
                     {e.imo && <span> • IMO {e.imo}</span>}
                   </div>
-
-                  {/* ✅ INSERTED GEO OUTPUT (this is what you asked for) */}
-                  {geoLine && (
-                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-                      {nearNow ? "Near River St now • " : ""}
-                      {geoLine}
-                    </div>
-                  )}
-
-                  {geoSub && (
-                    <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>
-                      {geoSub}
-                    </div>
-                  )}
 
                   {e.imo && !info && (
                     <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>
