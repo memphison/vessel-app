@@ -3,13 +3,16 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs"; // required (WebSocket not supported in Edge)
 
 // City Hall, Savannah (approx)
-const CITY_HALL = { lat: 32.08077, lon: -81.0903 };
+const CITY_HALL = { lat: 32.08077, lon: -81.09030 };
 
-// Default radius for the bbox query (miles). Increase if count stays 0.
-const DEFAULT_RADIUS_MI = 50;
-
-// Drop position entries not updated in this many minutes
-const STALE_MINUTES = 30;
+// A loose Savannah area bounding box.
+// Adjust later if you want wider coverage.
+const BBOX = [
+  [
+    [32.03, -81.16], // south-west (lat, lon)
+    [32.12, -81.02], // north-east (lat, lon)
+  ],
+];
 
 type AisPosition = {
   imo?: string;
@@ -21,22 +24,17 @@ type AisPosition = {
   lastSeenISO: string;
 };
 
-type BoundingBoxes = number[][][];
-
-
 type SnapshotRow = AisPosition & {
   distanceMi: number;
 };
 
 declare global {
   // eslint-disable-next-line no-var
-  var __AISSTREAM__:
-    | {
-        ws: WebSocket | null;
-        lastConnectISO: string | null;
-        positionsByKey: Map<string, AisPosition>;
-      }
-    | undefined;
+  var __AISSTREAM__: {
+    ws: WebSocket | null;
+    lastConnectISO: string | null;
+    positionsByKey: Map<string, AisPosition>;
+  } | undefined;
 }
 
 function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -51,29 +49,6 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) 
   return R * c;
 }
 
-/**
- * Build a loose bounding box around City Hall for AISStream.
- * We convert miles -> degrees using rough approximations:
- * - 1 degree latitude ~= 69 miles
- * - 1 degree longitude ~= 69 * cos(latitude) miles
- */
-function buildBoundingBoxes(radiusMi: number): BoundingBoxes {
-  const latPerMi = 1 / 69;
-  const lonPerMi = 1 / (69 * Math.cos((CITY_HALL.lat * Math.PI) / 180));
-
-  const latDelta = radiusMi * latPerMi;
-  const lonDelta = radiusMi * lonPerMi;
-
-  const minLat = CITY_HALL.lat - latDelta;
-  const maxLat = CITY_HALL.lat + latDelta;
-  const minLon = CITY_HALL.lon - lonDelta;
-  const maxLon = CITY_HALL.lon + lonDelta;
-
-  // AISStream expects: [ [ [minLat, minLon], [maxLat, maxLon] ] ]
-  return [[[minLat, minLon], [maxLat, maxLon]]];
-}
-
-
 function ensureStore() {
   if (!globalThis.__AISSTREAM__) {
     globalThis.__AISSTREAM__ = {
@@ -85,39 +60,25 @@ function ensureStore() {
   return globalThis.__AISSTREAM__!;
 }
 
-function cleanupStale(store: NonNullable<typeof globalThis.__AISSTREAM__>) {
-  const cutoff = Date.now() - STALE_MINUTES * 60_000;
-  for (const [k, v] of store.positionsByKey.entries()) {
-    const t = Date.parse(v.lastSeenISO);
-    if (!Number.isFinite(t) || t < cutoff) store.positionsByKey.delete(k);
-  }
-}
-
-async function connectIfNeeded(bboxToUse: BoundingBoxes) {
-
+async function connectIfNeeded() {
   const store = ensureStore();
-
-  // If we already have a live socket, keep it.
-  if (store.ws && store.ws.readyState === WebSocket.OPEN) return;
-
-  // If it exists but is CLOSED/CLOSING, drop it and recreate.
-  if (store.ws && store.ws.readyState !== WebSocket.CONNECTING) {
-    store.ws = null;
-  }
+  if (store.ws) return;
 
   const key = process.env.AISSTREAM_API_KEY;
   if (!key) {
     throw new Error("Missing AISSTREAM_API_KEY in environment.");
   }
 
+  // WebSocket is available in Node 18+ (Next.js Node runtime).
   const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
+
   store.ws = ws;
   store.lastConnectISO = new Date().toISOString();
 
   ws.addEventListener("open", () => {
     const msg = {
       APIKey: key,
-      BoundingBoxes: bboxToUse,
+      BoundingBoxes: BBOX,
       FilterMessageTypes: ["PositionReport", "ShipStaticData"],
     };
     ws.send(JSON.stringify(msg));
@@ -144,13 +105,7 @@ async function connectIfNeeded(bboxToUse: BoundingBoxes) {
         const imo = msg?.IMO ? String(msg.IMO).trim() : undefined;
         const mmsi = msg?.MMSI ? String(msg.MMSI).trim() : undefined;
 
-        const keyId =
-          imo && /^\d{7}$/.test(imo)
-            ? `IMO:${imo}`
-            : mmsi
-            ? `MMSI:${mmsi}`
-            : null;
-
+        const keyId = (imo && /^\d{7}$/.test(imo)) ? `IMO:${imo}` : (mmsi ? `MMSI:${mmsi}` : null);
         if (!keyId) return;
 
         const prev = store.positionsByKey.get(keyId);
@@ -195,23 +150,10 @@ async function connectIfNeeded(bboxToUse: BoundingBoxes) {
   });
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(req.url);
-
-    // radius in miles (default 50). Try 80 or 120 if you still see count:0.
-    const rParam = Number(searchParams.get("r") || DEFAULT_RADIUS_MI);
-    const radiusMi = Number.isFinite(rParam) && rParam > 0 ? rParam : DEFAULT_RADIUS_MI;
-
-    const limitParam = Number(searchParams.get("limit") || 200);
-    const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(500, limitParam)) : 200;
-
-    const bbox = buildBoundingBoxes(radiusMi);
-
-    await connectIfNeeded(bbox);
-
+    await connectIfNeeded();
     const store = ensureStore();
-    cleanupStale(store);
 
     // Build snapshot sorted by distance
     const rows: SnapshotRow[] = [];
@@ -225,11 +167,10 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       cityHall: CITY_HALL,
-      radiusMi,
-      bbox,
+      bbox: BBOX,
       lastConnectISO: store.lastConnectISO,
       count: rows.length,
-      vessels: rows.slice(0, limit),
+      vessels: rows.slice(0, 200), // keep payload reasonable
     });
   } catch (e: any) {
     return NextResponse.json(
