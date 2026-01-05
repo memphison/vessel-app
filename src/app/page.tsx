@@ -329,7 +329,7 @@ export default function HomePage() {
       <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
-        All arrivals or departures in the {windowLabel}. Refreshes every minute.
+        All vessel arrivals or departures in the {windowLabel}. Refreshes every minute.
       </p>
 
       <div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
