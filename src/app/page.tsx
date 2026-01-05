@@ -326,7 +326,7 @@ export default function HomePage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>Savannah Vessel Watch</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         All arrivals or departures in the {windowLabel}. Refreshes every minute.
