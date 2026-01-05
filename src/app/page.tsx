@@ -508,7 +508,27 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 6, fontSize: 18 }}>{e.vesselName}</div>
+                  <div style={{ marginTop: 6, fontSize: 18 }}>
+  {e.imo ? (
+    <a
+      href={`https://www.vesselfinder.com/?imo=${e.imo}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: theme.pageText,
+        textDecoration: "none",
+        fontWeight: 600,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+      onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+    >
+      {e.vesselName}
+    </a>
+  ) : (
+    <span>{e.vesselName}</span>
+  )}
+</div>
+
 
                   <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                     {e.operator && <span>{e.operator}</span>}
