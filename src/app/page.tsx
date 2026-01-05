@@ -449,7 +449,7 @@ export default function HomePage() {
                       info.vesselType && info.yearBuilt ? " • " : ""
                     }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
                       (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-                    }${info.flag ? `Flag ${info.flag}` : ""}${
+                    }${info.flag ? `Flag: ${info.flag}` : ""}${
                       (info.vesselType || info.yearBuilt || info.flag) && formattedGT
                         ? " • "
                         : ""
