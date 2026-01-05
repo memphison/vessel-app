@@ -70,7 +70,7 @@ function bestDT(
 function hoursFromWindow(window: string): number {
   if (window === "24h") return 24;
   if (window === "3h") return 3;
-  if (window === "2h") return 2;
+  if (window === "3h") return 2;
   return 1;
 }
 

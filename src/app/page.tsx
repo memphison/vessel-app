@@ -34,7 +34,7 @@ type VesselInfo = {
 
 type Dir = "next" | "past";
 type WindowNext = "1h" | "3h" | "24h";
-type WindowPast = "1h" | "2h" | "24h";
+type WindowPast = "1h" | "3h" | "24h";
 type Window = WindowNext | WindowPast;
 
 function formatDateTime(iso: string) {
@@ -225,7 +225,7 @@ setAisByImo(map);
         : "next 24 hours";
     } else {
       const w = timeWindow as WindowPast;
-      return w === "1h" ? "past hour" : w === "2h" ? "past 2 hours" : "past 24 hours";
+      return w === "1h" ? "past hour" : w === "3h" ? "past 3 hours" : "past 24 hours";
     }
   }, [dir, timeWindow]);
 
@@ -312,7 +312,7 @@ setAisByImo(map);
 
   const pastButtons: Array<{ w: WindowPast; label: string }> = [
     { w: "1h", label: "Past 1 hour" },
-    { w: "2h", label: "Past 2 hours" },
+    { w: "3h", label: "Past 3 hours" },
     { w: "24h", label: "Past 24 hours" },
   ];
 
