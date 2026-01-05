@@ -142,6 +142,8 @@ export default function HomePage() {
   const [isDark, setIsDark] = useState(false);
 
   const [aisByImo, setAisByImo] = useState<Record<string, AisVessel>>({});
+  const [aisByMmsi, setAisByMmsi] = useState<Record<string, AisVessel>>({});
+
   const [aisStatus, setAisStatus] = useState<{ lastUpdated: string | null; count: number }>(
     {
       lastUpdated: null,
@@ -157,12 +159,13 @@ export default function HomePage() {
       if (!resp.ok || !data?.ok) return;
 
       const map: Record<string, AisVessel> = {};
-      for (const v of data.vessels || []) {
-        const imo = (v.imo || "").trim();
-        if (/^\d{7}$/.test(imo)) map[imo] = v;
-      }
+for (const v of data.vessels || []) {
+  const imo = (v.imo || "").trim();
+  if (/^\d{7}$/.test(imo)) map[imo] = v;
+}
 
-      setAisByImo(map);
+setAisByImo(map);
+
       setAisStatus({
         lastUpdated: new Date().toLocaleTimeString(),
         count: data.count || 0,
@@ -416,7 +419,11 @@ export default function HomePage() {
             {events.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
-              const ais = e.imo ? aisByImo[e.imo] : undefined;
+              const ais =
+                (e.imo ? aisByImo[e.imo] : undefined) ??
+                (info?.imo ? aisByImo[info.imo] : undefined) ??
+                (info as any)?.mmsi ? aisByMmsi[(info as any).mmsi] : undefined;
+
 
               const nearNow =
                 ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false; // 1 mile threshold
