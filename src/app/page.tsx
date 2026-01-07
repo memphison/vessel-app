@@ -371,9 +371,11 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-        AIS: {aisStatus.count} vessels in range
+       {aisStatus.count === 0
+          ? "No ships currently moving through the river"
+          : `AIS: ${aisStatus.count} vessels in range`}
         {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
-      </div>
+      </div>  
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
         {events.length} total moves in the {windowLabel}.
