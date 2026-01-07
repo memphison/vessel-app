@@ -30,6 +30,9 @@ type VesselInfo = {
   grossTonnage: string | null;
   flag: string | null;
   source?: string;
+
+  // Some sources include MMSI; we’ll use it if present
+  mmsi?: string | null;
 };
 
 type Dir = "next" | "past";
@@ -128,6 +131,12 @@ function getLengthWidth(info?: VesselInfo) {
   return { length, width };
 }
 
+// We extend events locally so AIS-only cards can carry MMSI even if IMO is missing
+type RenderEvent = VesselEvent & {
+  aisMmsi?: string;
+  _isAisOnly?: boolean;
+};
+
 export default function HomePage() {
   const [events, setEvents] = useState<VesselEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -171,6 +180,7 @@ export default function HomePage() {
         const imo = (v.imo || "").trim();
         const mmsi = (v.mmsi || "").trim();
 
+        // Keep both maps. IMO may be missing for many vessels.
         if (/^\d{7}$/.test(imo)) byImo[imo] = v;
         if (/^\d{9}$/.test(mmsi)) byMmsi[mmsi] = v;
       }
@@ -336,48 +346,66 @@ export default function HomePage() {
     } as const;
   }
 
-  // ✅ FIX:
-  // Always show AIS-only cards for AIS vessels in the bbox even if they have NO IMO.
-  // We dedupe against GA Ports cards when AIS provides a valid IMO that matches an event IMO.
-  const mergedEvents = useMemo(() => {
+  // ✅ FIX: AIS-only cards should ALSO work when we only have MMSI (no IMO).
+  // We dedupe AIS-only vs GA Ports events by:
+  // - IMO when available
+  // - otherwise MMSI (for AIS-only vessels)
+  const mergedEvents: RenderEvent[] = useMemo(() => {
     const eventImos = new Set(
       events
         .map((ev) => (ev.imo || "").trim())
         .filter((imo) => /^\d{7}$/.test(imo))
     );
 
-    const aisOnlyEvents: VesselEvent[] = (aisVessels || [])
-      .filter((v) => {
-        const imo = (v.imo || "").trim();
-        // If AIS has an IMO and it is already in the events list, do not duplicate it
-        if (/^\d{7}$/.test(imo) && eventImos.has(imo)) return false;
-        // Otherwise, include it (even if it only has MMSI)
-        return true;
-      })
-      .map((v) => {
-        const imo = (v.imo || "").trim();
-        const mmsi = (v.mmsi || "").trim();
+    // Also keep a weak set of event names to avoid obvious doubles (optional safety)
+    const eventNames = new Set(
+      events
+        .map((ev) => (ev.vesselName || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
 
-        const nameBits: string[] = ["AIS Track"];
-        if (/^\d{7}$/.test(imo)) nameBits.push(`IMO ${imo}`);
-        else if (/^\d{9}$/.test(mmsi)) nameBits.push(`MMSI ${mmsi}`);
+    const aisOnly = (aisVessels || []).filter((v) => {
+      const imo = (v.imo || "").trim();
+      const mmsi = (v.mmsi || "").trim();
 
-        return {
-          type: "ARRIVAL", // placeholder; UI will label as UNDERWAY
-          timeISO: v.lastSeenISO,
-          timeLabel: "",
-          timeType: "ACTUAL",
-          vesselName: nameBits.join(" • "),
-          imo: /^\d{7}$/.test(imo) ? imo : undefined,
-          service: undefined,
-          operator: undefined,
-          berth: undefined,
-          status: "AIS-only (live in river)",
-        };
-      });
+      // If AIS has an IMO and GA Ports already has it, skip
+      if (/^\d{7}$/.test(imo) && eventImos.has(imo)) return false;
 
-    // Put AIS-only at the top so you always see "what is moving now"
-    return [...aisOnlyEvents, ...events];
+      // If AIS has no IMO but has MMSI, still allow it.
+      // We only lightly guard against duplicates by name.
+      const approxName = ""; // AIS payload doesn’t include name in your current snapshot
+      if (approxName && eventNames.has(approxName)) return false;
+
+      // Require at least MMSI or IMO to render a stable card key
+      if (!/^\d{7}$/.test(imo) && !/^\d{9}$/.test(mmsi)) return false;
+
+      return true;
+    });
+
+    const aisOnlyEvents: RenderEvent[] = aisOnly.map((v) => {
+      const imo = (v.imo || "").trim();
+      const mmsi = (v.mmsi || "").trim();
+
+      const hasImo = /^\d{7}$/.test(imo);
+      const hasMmsi = /^\d{9}$/.test(mmsi);
+
+      return {
+        type: "ARRIVAL", // placeholder; UI will label as "UNDERWAY"
+        timeISO: v.lastSeenISO,
+        timeLabel: "",
+        timeType: "ACTUAL",
+        vesselName: hasImo ? "AIS Track" : hasMmsi ? `AIS Vessel ${mmsi}` : "AIS Vessel",
+        imo: hasImo ? imo : undefined,
+        aisMmsi: hasMmsi ? mmsi : undefined,
+        service: undefined,
+        operator: undefined,
+        berth: undefined,
+        status: "AIS-only (not in GA Ports list)",
+        _isAisOnly: true,
+      };
+    });
+
+    return [...aisOnlyEvents, ...(events as RenderEvent[])];
   }, [events, aisVessels]);
 
   return (
@@ -450,7 +478,7 @@ export default function HomePage() {
 
         {!loading && error && <p style={{ color: "crimson" }}>{error} Try refreshing the page.</p>}
 
-        {!loading && !error && events.length === 0 && (
+        {!loading && !error && events.length === 0 && mergedEvents.length === 0 && (
           <div
             style={{
               border: `1px solid ${theme.emptyBorder}`,
@@ -468,15 +496,23 @@ export default function HomePage() {
         {!loading && !error && mergedEvents.length > 0 && (
           <div style={{ display: "grid", gap: 12 }}>
             {mergedEvents.map((e, i) => {
+              const isAisOnly = e._isAisOnly === true || e.status === "AIS-only (not in GA Ports list)";
+
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
               const eImo = (e.imo || "").trim();
               const infoImo = (info?.imo || "").trim();
+
+              // MMSI can come from:
+              // - AIS-only event field (e.aisMmsi)
+              // - vessel-info if your /api/vessel-info returns it (info.mmsi)
+              const eventMmsi = String((e as any)?.aisMmsi || "").trim();
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
               const ais =
                 (eImo ? aisByImo[eImo] : undefined) ??
                 (infoImo ? aisByImo[infoImo] : undefined) ??
+                (eventMmsi ? aisByMmsi[eventMmsi] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
 
               // "Soon" callout (only makes sense on the "next" view)
@@ -487,9 +523,6 @@ export default function HomePage() {
                 Number.isFinite(msUntil) &&
                 msUntil >= 0 &&
                 msUntil <= soonWindowMinutes * 60_000;
-
-              const isAisOnly =
-                e.status === "AIS-only (live in river)" || e.status === "AIS-only (not in GA Ports list)";
 
               const soonText =
                 !isAisOnly && isSoon
@@ -525,6 +558,7 @@ export default function HomePage() {
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
+              // Particulars line (no gross tonnage here, we render GT as its own row)
               const particulars =
                 info && (info.vesselType || info.yearBuilt || info.flag)
                   ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
@@ -534,9 +568,26 @@ export default function HomePage() {
                     }`.trim()
                   : null;
 
+              // Link target:
+              // - If we have IMO, use IMO
+              // - else if we have MMSI, use MMSI (vesselfinder supports it)
+              const linkImo = /^\d{7}$/.test(eImo) ? eImo : undefined;
+              const linkMmsi =
+                !linkImo && /^\d{9}$/.test(eventMmsi)
+                  ? eventMmsi
+                  : !linkImo && /^\d{9}$/.test(infoMmsi)
+                  ? infoMmsi
+                  : undefined;
+
+              const vesselFinderHref = linkImo
+                ? `https://www.vesselfinder.com/?imo=${linkImo}`
+                : linkMmsi
+                ? `https://www.vesselfinder.com/?mmsi=${linkMmsi}`
+                : null;
+
               return (
                 <div
-                  key={`${e.type}-${e.timeISO}-${i}`}
+                  key={`${isAisOnly ? "AIS" : e.type}-${e.timeISO}-${e.imo || eventMmsi || i}`}
                   style={{
                     border: `1px solid ${theme.cardBorder}`,
                     borderRadius: 12,
@@ -613,7 +664,7 @@ export default function HomePage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
+                        {isAisOnly ? "Live AIS" : e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
                       </span>
 
                       {!isMobile && soonText && (
@@ -637,9 +688,9 @@ export default function HomePage() {
                   </div>
 
                   <div style={{ marginTop: 6, fontSize: 18 }}>
-                    {e.imo ? (
+                    {vesselFinderHref ? (
                       <a
-                        href={`https://www.vesselfinder.com/?imo=${e.imo}`}
+                        href={vesselFinderHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
@@ -667,11 +718,16 @@ export default function HomePage() {
                     )}
                   </div>
 
-                  {(e.operator || e.service || e.status) && (
+                  {/* Meta line */}
+                  {(e.operator || e.service || e.status || (isAisOnly && (eventMmsi || infoMmsi))) && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                       {e.operator && <span>{e.operator}</span>}
                       {e.service && <span> • {e.service}</span>}
                       {e.status && <span> • {e.status}</span>}
+                      {isAisOnly && (eventMmsi || infoMmsi) && (
+                        <span> • MMSI {eventMmsi || infoMmsi}</span>
+                      )}
+                      {!isAisOnly && e.imo && <span> • IMO {e.imo}</span>}
                     </div>
                   )}
 
@@ -686,7 +742,7 @@ export default function HomePage() {
                     <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>{geoSub}</div>
                   )}
 
-                  {e.imo && !info && (
+                  {!isAisOnly && e.imo && !info && (
                     <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>
                       Loading vessel details…
                     </div>
@@ -705,6 +761,13 @@ export default function HomePage() {
                   {particulars && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                       {particulars}
+                    </div>
+                  )}
+
+                  {/* Helpful hint if we have AIS vessels but could not match this particular GA Ports event */}
+                  {!isAisOnly && !ais && aisStatus.count > 0 && (
+                    <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>
+                      AIS data available, but this vessel did not match by IMO/MMSI.
                     </div>
                   )}
                 </div>
