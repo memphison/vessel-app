@@ -537,7 +537,8 @@ export default function HomePage() {
 
                       const label = isAisOnly ? "UNDERWAY" : e.type;
 
-                      const icon = isAisOnly ? "➜" : e.type === "ARRIVAL" ? "↓" : "↑";
+                      const icon = isAisOnly ? "➡" : e.type === "ARRIVAL" ? "⬇" : "⬆";
+
 
                       const color = isAisOnly
                         ? theme.pageText
