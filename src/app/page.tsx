@@ -336,8 +336,9 @@ export default function HomePage() {
     } as const;
   }
 
-  // ✅ AIS-only cards: if AIS sees a vessel in the bbox but GA Ports JSON no longer lists it,
-  // we still show it (without duplicating any GA Ports cards).
+  // ✅ FIX:
+  // Always show AIS-only cards for AIS vessels in the bbox even if they have NO IMO.
+  // We dedupe against GA Ports cards when AIS provides a valid IMO that matches an event IMO.
   const mergedEvents = useMemo(() => {
     const eventImos = new Set(
       events
@@ -345,25 +346,37 @@ export default function HomePage() {
         .filter((imo) => /^\d{7}$/.test(imo))
     );
 
-    const aisOnly = (aisVessels || []).filter((v) => {
-      const imo = (v.imo || "").trim();
-      if (!/^\d{7}$/.test(imo)) return false; // keep dedupe safe: only show AIS-only when IMO is known
-      return !eventImos.has(imo);
-    });
+    const aisOnlyEvents: VesselEvent[] = (aisVessels || [])
+      .filter((v) => {
+        const imo = (v.imo || "").trim();
+        // If AIS has an IMO and it is already in the events list, do not duplicate it
+        if (/^\d{7}$/.test(imo) && eventImos.has(imo)) return false;
+        // Otherwise, include it (even if it only has MMSI)
+        return true;
+      })
+      .map((v) => {
+        const imo = (v.imo || "").trim();
+        const mmsi = (v.mmsi || "").trim();
 
-    const aisOnlyEvents: VesselEvent[] = aisOnly.map((v) => ({
-      type: "ARRIVAL", // placeholder; UI will label as "UNDERWAY"
-      timeISO: v.lastSeenISO,
-      timeLabel: "",
-      timeType: "ACTUAL",
-      vesselName: "AIS Track",
-      imo: (v.imo || "").trim(),
-      service: undefined,
-      operator: undefined,
-      berth: undefined,
-      status: "AIS-only (not in GA Ports list)",
-    }));
+        const nameBits: string[] = ["AIS Track"];
+        if (/^\d{7}$/.test(imo)) nameBits.push(`IMO ${imo}`);
+        else if (/^\d{9}$/.test(mmsi)) nameBits.push(`MMSI ${mmsi}`);
 
+        return {
+          type: "ARRIVAL", // placeholder; UI will label as UNDERWAY
+          timeISO: v.lastSeenISO,
+          timeLabel: "",
+          timeType: "ACTUAL",
+          vesselName: nameBits.join(" • "),
+          imo: /^\d{7}$/.test(imo) ? imo : undefined,
+          service: undefined,
+          operator: undefined,
+          berth: undefined,
+          status: "AIS-only (live in river)",
+        };
+      });
+
+    // Put AIS-only at the top so you always see "what is moving now"
     return [...aisOnlyEvents, ...events];
   }, [events, aisVessels]);
 
@@ -461,21 +474,10 @@ export default function HomePage() {
               const infoImo = (info?.imo || "").trim();
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
-              // Primary matching
-              let ais =
+              const ais =
                 (eImo ? aisByImo[eImo] : undefined) ??
                 (infoImo ? aisByImo[infoImo] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
-
-              // Fallback fix:
-              // Sometimes AISStream sends PositionReports (MMSI) but we have not yet received ShipStaticData (IMO mapping).
-              // If we have exactly one AIS vessel in the box and it is very recent, show it rather than showing nothing.
-              if (!ais && aisVessels.length === 1) {
-                const only = aisVessels[0];
-                const seenMs = new Date(only.lastSeenISO).getTime();
-                const isRecent = Number.isFinite(seenMs) && Date.now() - seenMs <= 10 * 60_000; // 10 min
-                if (isRecent) ais = only;
-              }
 
               // "Soon" callout (only makes sense on the "next" view)
               const soonWindowMinutes = 120;
@@ -486,8 +488,8 @@ export default function HomePage() {
                 msUntil >= 0 &&
                 msUntil <= soonWindowMinutes * 60_000;
 
-              // Do not show "soon" for AIS-only underway cards
-              const isAisOnly = e.status === "AIS-only (not in GA Ports list)";
+              const isAisOnly =
+                e.status === "AIS-only (live in river)" || e.status === "AIS-only (not in GA Ports list)";
 
               const soonText =
                 !isAisOnly && isSoon
@@ -523,7 +525,6 @@ export default function HomePage() {
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
-              // Particulars line (no gross tonnage here, we render GT as its own row)
               const particulars =
                 info && (info.vesselType || info.yearBuilt || info.flag)
                   ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
@@ -571,7 +572,6 @@ export default function HomePage() {
                         <strong style={{ color, letterSpacing: 0.2 }}>
                           <span style={{ marginRight: 6 }}>{icon}</span>
                           {label}
-                          {/* Mobile: put "Departing soon" next to ARRIVAL/DEPARTURE to prevent wrap chaos */}
                           {isMobile && soonText && (
                             <span style={{ marginLeft: 8, fontWeight: 600, opacity: 0.9 }}>
                               · {soonText}
@@ -616,7 +616,6 @@ export default function HomePage() {
                         {e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
                       </span>
 
-                      {/* Desktop/tablet: keep pill in the right cluster. Mobile: moved into left label */}
                       {!isMobile && soonText && (
                         <span
                           style={{
@@ -668,7 +667,6 @@ export default function HomePage() {
                     )}
                   </div>
 
-                  {/* Meta line: remove Berth + IMO for casual users */}
                   {(e.operator || e.service || e.status) && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                       {e.operator && <span>{e.operator}</span>}
