@@ -461,10 +461,21 @@ export default function HomePage() {
               const infoImo = (info?.imo || "").trim();
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
-              const ais =
+              // Primary matching
+              let ais =
                 (eImo ? aisByImo[eImo] : undefined) ??
                 (infoImo ? aisByImo[infoImo] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
+
+              // Fallback fix:
+              // Sometimes AISStream sends PositionReports (MMSI) but we have not yet received ShipStaticData (IMO mapping).
+              // If we have exactly one AIS vessel in the box and it is very recent, show it rather than showing nothing.
+              if (!ais && aisVessels.length === 1) {
+                const only = aisVessels[0];
+                const seenMs = new Date(only.lastSeenISO).getTime();
+                const isRecent = Number.isFinite(seenMs) && Date.now() - seenMs <= 10 * 60_000; // 10 min
+                if (isRecent) ais = only;
+              }
 
               // "Soon" callout (only makes sense on the "next" view)
               const soonWindowMinutes = 120;
@@ -517,9 +528,9 @@ export default function HomePage() {
                 info && (info.vesselType || info.yearBuilt || info.flag)
                   ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
                       info.yearBuilt ? `Built ${info.yearBuilt}` : ""
-                    }${
-                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-                    }${info.flag ? `Flag: ${info.flag}` : ""}`.trim()
+                    }${(info.vesselType || info.yearBuilt) && info.flag ? " • " : ""}${
+                      info.flag ? `Flag: ${info.flag}` : ""
+                    }`.trim()
                   : null;
 
               return (

@@ -42,11 +42,18 @@ type VesselEvent = {
   status?: string;
 };
 
+function cleanStr(v?: string | null): string | undefined {
+  if (v == null) return undefined;
+  const s = String(v).trim();
+  return s.length ? s : undefined;
+}
+
 function parseDT(dateStr?: string, timeStr?: string): DateTime | null {
-  const d = (dateStr || "").trim();
-  const t = (timeStr || "").trim();
+  const d = cleanStr(dateStr);
+  const t = cleanStr(timeStr);
   if (!d || !t) return null;
 
+  // GA Ports format appears to be "MM/dd/yy" and "HH:mm"
   const dt = DateTime.fromFormat(`${d} ${t}`, "MM/dd/yy HH:mm", { zone: TZ });
   return dt.isValid ? dt : null;
 }
@@ -68,15 +75,15 @@ function bestDT(
 }
 
 function hoursFromWindow(window: string): number {
+  // Supported: 1h, 3h, 24h
   if (window === "24h") return 24;
   if (window === "3h") return 3;
-  if (window === "3h") return 2;
   return 1;
 }
 
 function normalizeIMO(lloydsId?: string): string | undefined {
-  const imo = (lloydsId || "").trim();
-  return /^\d{7}$/.test(imo) ? imo : undefined;
+  const imo = cleanStr(lloydsId);
+  return imo && /^\d{7}$/.test(imo) ? imo : undefined;
 }
 
 export async function GET(req: Request) {
@@ -108,6 +115,12 @@ export async function GET(req: Request) {
   for (const row of rows) {
     const imo = normalizeIMO(row.lloyds_id);
 
+    const vesselName = cleanStr(row.name) || "Unknown";
+    const service = cleanStr(row.service);
+    const operator = cleanStr(row.vsl_operator);
+    const berth = cleanStr(row.berth);
+    const status = cleanStr(row.status);
+
     // ARRIVAL: ATA first, else ETA
     const arr = bestDT(row.ata_date, row.ata_time, row.eta_date, row.eta_time);
     if (arr.dt && arr.timeType && arr.dt >= windowStart && arr.dt <= windowEnd) {
@@ -116,12 +129,12 @@ export async function GET(req: Request) {
         timeISO: arr.dt.toISO()!,
         timeLabel: arr.dt.toFormat("M/d/yy h:mm a"),
         timeType: arr.timeType,
-        vesselName: row.name || "Unknown",
+        vesselName,
         imo,
-        service: row.service,
-        operator: row.vsl_operator,
-        berth: row.berth,
-        status: row.status,
+        service,
+        operator,
+        berth,
+        status,
       });
     }
 
@@ -133,12 +146,12 @@ export async function GET(req: Request) {
         timeISO: dep.dt.toISO()!,
         timeLabel: dep.dt.toFormat("M/d/yy h:mm a"),
         timeType: dep.timeType,
-        vesselName: row.name || "Unknown",
+        vesselName,
         imo,
-        service: row.service,
-        operator: row.vsl_operator,
-        berth: row.berth,
-        status: row.status,
+        service,
+        operator,
+        berth,
+        status,
       });
     }
   }
