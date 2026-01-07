@@ -66,10 +66,11 @@ function presetConfig(presetRaw: string | null) {
   }
 
   // default Savannah (City Hall-ish)
-  const city = { lat: 32.08077, lon: -81.09030 };
+  const city = { lat: 32.08158, lon: -81.090040 };
 
-  // wide-ish Savannah coastal box (you can tighten later)
-  const bbox: BBox = [[[31.35613231884058, -81.94553130944576], [32.80540768115942, -80.23506869055424]]];
+// tighter Savannah River box
+const bbox: BBox = [[[31.968366, -81.169962], [32.165465, -80.762266]]];
+
 
   return { preset: "sav", cityHall: city, bbox };
 }
