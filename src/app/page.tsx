@@ -372,7 +372,7 @@ export default function HomePage() {
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
        {aisStatus.count === 0
-          ? "No ships currently moving through the river"
+          ? "No ships are currently moving through the port"
           : `AIS: ${aisStatus.count} vessels in range`}
         {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
       </div>  
