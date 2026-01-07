@@ -455,6 +455,24 @@ export default function HomePage() {
                 (infoImo ? aisByImo[infoImo] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
 
+                // "Soon" callout (only makes sense on the "next" view)
+              const soonWindowMinutes = 120;
+
+              const msUntil = new Date(e.timeISO).getTime() - Date.now();
+              const isSoon = dir === "next" && Number.isFinite(msUntil) && msUntil >= 0 && msUntil <= soonWindowMinutes * 60_000;
+
+              // Do not show "soon" for AIS-only underway cards
+              const isAisOnly = e.status === "AIS-only (not in GA Ports list)";
+
+              const soonText =
+                !isAisOnly && isSoon
+                  ? e.type === "DEPARTURE"
+                    ? "Departing soon"
+                    : e.type === "ARRIVAL"
+                    ? "Arriving soon"
+                    : "Next up"
+                  : null;
+
               const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false; // 1 mile threshold
 
               const geoLine = ais
@@ -470,10 +488,14 @@ export default function HomePage() {
                 : null;
 
               const { length, width } = getLengthWidth(info);
+
               const dims =
                 length || width
-                  ? `${length ? `Length ${length}` : ""}${length && width ? " / " : ""}${width ? `Width ${width}` : ""}`
+                  ? `Size: ${length ? `${length} long` : ""}${length && width ? " • " : ""}${
+                      width ? `${width} wide` : ""
+                    }`
                   : null;
+
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
@@ -533,8 +555,24 @@ export default function HomePage() {
                           fontWeight: 600,
                         }}
                       >
-                        {e.timeType === "ACTUAL" ? "Actual" : "Estimated"}
+                        {e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
+
                       </span>
+
+                        {soonText && (
+                          <span
+                            style={{
+                              fontSize: 12,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              background: isDark ? "rgba(255,255,255,0.12)" : "#f3f3f3",
+                              color: isDark ? "rgba(245,245,245,0.9)" : "#111",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {soonText}
+                          </span>
+                        )}
 
                       <strong>{formatDateTime(e.timeISO)}</strong>
                     </div>
