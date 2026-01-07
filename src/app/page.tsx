@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 
 type VesselEvent = {
-  type: "ARRIVAL" | "DEPARTURE";
+  type: "ARRIVAL" | "DEPARTURE" | "UNDERWAY";
   timeISO: string;
   timeLabel: string;
-  timeType: "ACTUAL" | "ESTIMATED";
+  timeType: "ACTUAL" | "ESTIMATED" | "LIVE";
   vesselName: string;
   imo?: string;
-  mmsi?: string; // ✅ added so AIS-only cards can be keyed and matched even without IMO
+  mmsi?: string; // AIS-only cards can be keyed and matched even without IMO
   service?: string;
   operator?: string;
   berth?: string;
@@ -337,56 +337,49 @@ export default function HomePage() {
     } as const;
   }
 
-  // ✅ Count moving ships from AIS (sog is knots)
+  // Moving ships from AIS (sog is knots). Threshold can be tuned.
   const movingCount = useMemo(() => {
     return (aisVessels || []).filter((v) => (v.sog ?? 0) >= 0.5).length;
   }, [aisVessels]);
 
   /**
-   * ✅ Merge rule change:
-   * - Always create AIS-only "UNDERWAY" cards, even when IMO is missing.
-   * - Key them by MMSI (fallback), and only dedupe against GA Ports events when IMO matches.
+   * FIX: Always render live AIS movers as UNDERWAY cards.
+   * - They get a timestamp of "now" so they always show up in the list.
+   * - They do not depend on GA Ports arrivals/departures.
+   * - We still show scheduled GA Ports events below them.
    */
   const mergedEvents = useMemo(() => {
-    const eventImos = new Set(
-      events
-        .map((ev) => (ev.imo || "").trim())
-        .filter((imo) => /^\d{7}$/.test(imo))
-    );
+    const nowISO = new Date().toISOString();
 
-    const aisOnlyEvents: VesselEvent[] = (aisVessels || [])
+    // Create live UNDERWAY cards for movers
+    const aisUnderwayEvents: VesselEvent[] = (aisVessels || [])
+      .filter((v) => (v.sog ?? 0) >= 0.5)
       .filter((v) => {
-        // Optional: only show movers. Comment this out if you want all AIS targets.
-        const isMoving = (v.sog ?? 0) >= 0.5;
-        if (!isMoving) return false;
-
-        const imo = (v.imo || "").trim();
-        if (/^\d{7}$/.test(imo)) {
-          // If AIS has an IMO and it is already in GA Ports events, do not add an AIS-only duplicate.
-          return !eventImos.has(imo);
-        }
-
-        // No IMO available: still show it (this was the missing behavior)
-        const mmsi = (v.mmsi || "").trim();
-        return /^\d{9}$/.test(mmsi);
+        const mmsi = String(v.mmsi || "").trim();
+        const imo = String(v.imo || "").trim();
+        return /^\d{9}$/.test(mmsi) || /^\d{7}$/.test(imo);
       })
+      .sort((a, b) => (a.distanceMi ?? 9999) - (b.distanceMi ?? 9999))
       .map((v) => {
-        const imo = (v.imo || "").trim();
-        const mmsi = (v.mmsi || "").trim();
+        const imo = String(v.imo || "").trim();
+        const mmsi = String(v.mmsi || "").trim();
+
+        const name =
+          /^\d{7}$/.test(imo) ? `IMO ${imo}` : /^\d{9}$/.test(mmsi) ? `MMSI ${mmsi}` : "Live AIS";
 
         return {
-          type: "ARRIVAL", // placeholder, UI labels as UNDERWAY
-          timeISO: v.lastSeenISO,
-          timeLabel: "",
-          timeType: "ACTUAL",
-          vesselName: imo ? "AIS Track" : mmsi ? `MMSI ${mmsi}` : "AIS Track",
+          type: "UNDERWAY",
+          timeISO: nowISO,
+          timeLabel: "Now",
+          timeType: "LIVE",
+          vesselName: name,
           imo: /^\d{7}$/.test(imo) ? imo : undefined,
           mmsi: /^\d{9}$/.test(mmsi) ? mmsi : undefined,
-          status: "AIS-only (live)",
+          status: "Live AIS (moving)",
         };
       });
 
-    return [...aisOnlyEvents, ...events];
+    return [...aisUnderwayEvents, ...events];
   }, [events, aisVessels]);
 
   return (
@@ -402,9 +395,7 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-        {aisStatus.count === 0
-          ? "AIS: no targets in range"
-          : `AIS: ${aisStatus.count} targets in range`}
+        {aisStatus.count === 0 ? "AIS: no targets in range" : `AIS: ${aisStatus.count} targets in range`}
         {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
         {aisStatus.count > 0 ? ` • Moving now: ${movingCount}` : ""}
       </div>
@@ -485,26 +476,27 @@ export default function HomePage() {
               const infoImo = (info?.imo || "").trim();
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
-              // ✅ Prefer direct MMSI match first for AIS-only cards
+              // Prefer direct MMSI match first for AIS cards, then IMO
               const ais =
                 (eMmsi ? aisByMmsi[eMmsi] : undefined) ??
                 (eImo ? aisByImo[eImo] : undefined) ??
                 (infoImo ? aisByImo[infoImo] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
 
-              // "Soon" callout (only makes sense on the "next" view)
+              // "Soon" callout (only makes sense on the "next" view). Not for UNDERWAY.
               const soonWindowMinutes = 120;
               const msUntil = new Date(e.timeISO).getTime() - Date.now();
               const isSoon =
                 dir === "next" &&
+                e.type !== "UNDERWAY" &&
                 Number.isFinite(msUntil) &&
                 msUntil >= 0 &&
                 msUntil <= soonWindowMinutes * 60_000;
 
-              const isAisOnly = e.status === "AIS-only (live)";
+              const isUnderway = e.type === "UNDERWAY";
 
               const soonText =
-                !isAisOnly && isSoon
+                !isUnderway && isSoon
                   ? e.type === "DEPARTURE"
                     ? "Departing soon"
                     : e.type === "ARRIVAL"
@@ -541,9 +533,9 @@ export default function HomePage() {
                 info && (info.vesselType || info.yearBuilt || info.flag)
                   ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
                       info.yearBuilt ? `Built ${info.yearBuilt}` : ""
-                    }${
-                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-                    }${info.flag ? `Flag: ${info.flag}` : ""}`.trim()
+                    }${(info.vesselType || info.yearBuilt) && info.flag ? " • " : ""}${
+                      info.flag ? `Flag: ${info.flag}` : ""
+                    }`.trim()
                   : null;
 
               return (
@@ -567,10 +559,10 @@ export default function HomePage() {
                     }}
                   >
                     {(() => {
-                      const label = isAisOnly ? "UNDERWAY" : e.type;
-                      const icon = isAisOnly ? "➡" : e.type === "ARRIVAL" ? "⬇" : "⬆";
+                      const label = isUnderway ? "UNDERWAY" : e.type;
+                      const icon = isUnderway ? "➡" : e.type === "ARRIVAL" ? "⬇" : "⬆";
 
-                      const color = isAisOnly
+                      const color = isUnderway
                         ? theme.pageText
                         : e.type === "ARRIVAL"
                         ? isDark
@@ -608,16 +600,24 @@ export default function HomePage() {
                           padding: "2px 6px",
                           borderRadius: 6,
                           background: isDark
-                            ? e.timeType === "ACTUAL"
+                            ? isUnderway
+                              ? "rgba(255,255,255,0.12)"
+                              : e.timeType === "ACTUAL"
                               ? "rgba(19,115,51,0.25)"
                               : "rgba(255,255,255,0.12)"
+                            : isUnderway
+                            ? "#f3f3f3"
                             : e.timeType === "ACTUAL"
                             ? "#e6f4ea"
                             : "#f3f3f3",
                           color: isDark
-                            ? e.timeType === "ACTUAL"
+                            ? isUnderway
+                              ? "rgba(245,245,245,0.85)"
+                              : e.timeType === "ACTUAL"
                               ? "#b7f5c9"
                               : "rgba(245,245,245,0.85)"
+                            : isUnderway
+                            ? "#555"
                             : e.timeType === "ACTUAL"
                             ? "#137333"
                             : "#555",
@@ -625,7 +625,7 @@ export default function HomePage() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {isAisOnly ? "Live AIS" : e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
+                        {isUnderway ? "Live AIS" : e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
                       </span>
 
                       {!isMobile && soonText && (
@@ -694,14 +694,10 @@ export default function HomePage() {
                     </div>
                   )}
 
-                  {geoSub && (
-                    <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>{geoSub}</div>
-                  )}
+                  {geoSub && <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>{geoSub}</div>}
 
                   {e.imo && !info && (
-                    <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>
-                      Loading vessel details…
-                    </div>
+                    <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>Loading vessel details…</div>
                   )}
 
                   {dims && <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>{dims}</div>}
@@ -713,9 +709,7 @@ export default function HomePage() {
                   )}
 
                   {particulars && (
-                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-                      {particulars}
-                    </div>
+                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>{particulars}</div>
                   )}
                 </div>
               );
