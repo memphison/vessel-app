@@ -592,7 +592,7 @@ export default function HomePage() {
                       >
                         {e.vesselName}
                         <span style={{ fontSize: 12, opacity: 0.6, marginLeft: 6 }}>
-                        ↗ details
+                        ↗ track
                          </span>
                       </a>
                     ) : (
