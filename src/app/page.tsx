@@ -54,7 +54,12 @@ function formatDateTime(iso: string) {
 type AisVessel = {
   imo?: string;
   mmsi?: string;
-  name?: string | null; // ✅ used for display if available
+
+  // Optional "static" fields (only present when API has them)
+  name?: string | null;
+  callsign?: string | null;
+  shipType?: string | number | null;
+
   lat: number;
   lon: number;
   sog?: number;
@@ -62,6 +67,7 @@ type AisVessel = {
   lastSeenISO: string;
   distanceMi: number;
 };
+
 
 type AisSnapshot = {
   ok: boolean;
@@ -192,7 +198,8 @@ export default function HomePage() {
 
   useEffect(() => {
     loadAis();
-    const id = setInterval(loadAis, 10_000);
+    const id = setInterval(loadAis, 30_000);
+
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -349,45 +356,66 @@ export default function HomePage() {
    * - They do not depend on GA Ports arrivals/departures.
    * - We still show scheduled GA Ports events below them.
    */
-  const mergedEvents = useMemo(() => {
-    const nowISO = new Date().toISOString();
+ const mergedEvents = useMemo(() => {
+  const nowISO = new Date().toISOString();
 
-    // Create live UNDERWAY cards for movers
-    const aisUnderwayEvents: VesselEvent[] = (aisVessels || [])
-      .filter((v) => (v.sog ?? 0) >= 0.5)
-      .filter((v) => {
-        const mmsi = String(v.mmsi || "").trim();
-        const imo = String(v.imo || "").trim();
-        return /^\d{9}$/.test(mmsi) || /^\d{7}$/.test(imo);
-      })
-      .sort((a, b) => (a.distanceMi ?? 9999) - (b.distanceMi ?? 9999))
-      .map((v) => {
-        const imo = String(v.imo || "").trim();
-        const mmsi = String(v.mmsi || "").trim();
+  const aisUnderwayEvents: VesselEvent[] = (aisVessels || [])
+    .filter((v) => (v.sog ?? 0) >= 0.5)
 
-        // ✅ CHANGE: Use AIS name first if present, else fall back to IMO/MMSI labels
-        const displayName =
-          (v.name && String(v.name).trim()) ||
-          (/^\d{7}$/.test(imo)
+    // Optional "big ship" filter
+    .filter((v) => {
+      const raw = v.shipType;
+
+      // keep unknown types for now
+      if (raw == null) return true;
+
+      const t =
+        typeof raw === "number"
+          ? raw
+          : Number(String(raw).trim().match(/\d+/)?.[0]);
+
+      // if we can't parse a numeric type, keep it for now
+      if (!Number.isFinite(t)) return true;
+
+      return t >= 70 && t <= 89;
+    })
+
+    .filter((v) => {
+      const mmsi = String(v.mmsi || "").trim();
+      const imo = String(v.imo || "").trim();
+      return /^\d{9}$/.test(mmsi) || /^\d{7}$/.test(imo);
+    })
+
+    .sort((a, b) => (a.distanceMi ?? 9999) - (b.distanceMi ?? 9999))
+
+    .map((v) => {
+      const imo = String(v.imo || "").trim();
+      const mmsi = String(v.mmsi || "").trim();
+
+      const prettyName =
+        v.name && v.name.trim()
+          ? v.name.trim()
+          : /^\d{7}$/.test(imo)
             ? `IMO ${imo}`
             : /^\d{9}$/.test(mmsi)
-            ? `MMSI ${mmsi}`
-            : "Live AIS");
+              ? `MMSI ${mmsi}`
+              : "Live AIS";
 
-        return {
-          type: "UNDERWAY",
-          timeISO: nowISO,
-          timeLabel: "Now",
-          timeType: "LIVE",
-          vesselName: displayName,
-          imo: /^\d{7}$/.test(imo) ? imo : undefined,
-          mmsi: /^\d{9}$/.test(mmsi) ? mmsi : undefined,
-          status: "Live AIS (moving)",
-        };
-      });
+      return {
+        type: "UNDERWAY",
+        timeISO: nowISO,
+        timeLabel: "Now",
+        timeType: "LIVE",
+        vesselName: prettyName,
+        imo: /^\d{7}$/.test(imo) ? imo : undefined,
+        mmsi: /^\d{9}$/.test(mmsi) ? mmsi : undefined,
+        status: "Live AIS (moving)",
+      };
+    });
 
-    return [...aisUnderwayEvents, ...events];
-  }, [events, aisVessels]);
+  return [...aisUnderwayEvents, ...events];
+}, [events, aisVessels]);
+
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
@@ -718,7 +746,16 @@ export default function HomePage() {
                       {e.status && <span> • {e.status}</span>}
                     </div>
                   )}
+                  {ais && (ais.callsign || ais.shipType != null) && (
+  <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>
+    {ais.callsign ? <>Callsign: {ais.callsign}</> : null}
+    {ais.callsign && ais.shipType != null ? " • " : null}
+    {ais.shipType != null ? <>Type: {ais.shipType}</> : null}
+  </div>
+)}
 
+                  
+                  
                   {geoLine && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                       {nearNow ? "Near River St now • " : ""}
