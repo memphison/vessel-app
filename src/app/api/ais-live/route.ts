@@ -1,235 +1,171 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs"; // WebSocket not supported in Edge
-
 type BBox = [[[number, number], [number, number]]];
 
-type AisPosition = {
+type AisVessel = {
   imo?: string;
   mmsi?: string;
   lat: number;
   lon: number;
-  sog?: number; // knots
-  cog?: number; // degrees
+  sog?: number;
+  cog?: number;
   lastSeenISO: string;
-};
-
-type SnapshotRow = AisPosition & {
   distanceMi: number;
 };
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __AISSTREAM__: {
-    ws: WebSocket | null;
-    lastConnectISO: string | null;
-    lastMessageISO: string | null;
-    lastError: string | null;
-    bboxKey: string | null; // to detect preset/bbox changes
-    positionsByKey: Map<string, AisPosition>;
-  } | undefined;
+const CITY_HALL = { lat: 32.0809, lon: -81.0912 };
+
+// Your tighter bbox:
+// SW: 31.968366, -81.169962
+// NE: 32.165465, -80.762266
+const BBOX: BBox = [[[31.968366, -81.169962], [32.165465, -80.762266]]];
+
+function haversineMiles(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
+  const R = 3958.7613; // miles
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLon = Math.sin(dLon / 2);
+
+  const h =
+    sinDLat * sinDLat +
+    Math.cos(lat1) * Math.cos(lat2) * (sinDLon * sinDLon);
+
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const toRad = (v: number) => (v * Math.PI) / 180;
-  const R = 3958.7613;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+function inBbox(lat: number, lon: number) {
+  const [[minLat, minLon], [maxLat, maxLon]] = BBOX[0];
+  return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
 }
 
-function ensureStore() {
-  if (!globalThis.__AISSTREAM__) {
-    globalThis.__AISSTREAM__ = {
-      ws: null,
-      lastConnectISO: null,
-      lastMessageISO: null,
-      lastError: null,
-      bboxKey: null,
-      positionsByKey: new Map<string, AisPosition>(),
-    };
-  }
-  return globalThis.__AISSTREAM__!;
-}
+export async function GET() {
+  const apiKey = process.env.AISSTREAM_API_KEY;
 
-function presetConfig(presetRaw: string | null) {
-  const preset = (presetRaw || "sav").toLowerCase();
-
-  if (preset === "ny") {
-    const city = { lat: 40.7128, lon: -74.0060 };
-    const bbox: BBox = [[[40.45, -74.35], [40.95, -73.6]]];
-    return { preset: "ny", cityHall: city, bbox };
-  }
-
-  // default Savannah (City Hall-ish)
-  const city = { lat: 32.08158, lon: -81.090040 };
-
-// tighter Savannah River box
-const bbox: BBox = [[[31.968366, -81.169962], [32.165465, -80.762266]]];
-
-
-  return { preset: "sav", cityHall: city, bbox };
-}
-
-function closeWs(store: ReturnType<typeof ensureStore>) {
-  try {
-    store.ws?.close();
-  } catch {
-    // ignore
-  }
-  store.ws = null;
-}
-
-async function connectIfNeeded(bbox: BBox) {
-  const store = ensureStore();
-
-  const key = process.env.AISSTREAM_API_KEY;
-  if (!key) throw new Error("Missing AISSTREAM_API_KEY in environment.");
-
-  const nextKey = JSON.stringify(bbox);
-
-  // If bbox/preset changed, force reconnect + clear old positions (optional but cleaner)
-  if (store.bboxKey && store.bboxKey !== nextKey) {
-    closeWs(store);
-    store.positionsByKey.clear();
-    store.lastMessageISO = null;
-    store.lastError = null;
-  }
-
-  store.bboxKey = nextKey;
-
-  // Already have a WS that is OPEN or CONNECTING
-  if (store.ws && (store.ws.readyState === 0 || store.ws.readyState === 1)) return;
-
-  const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
-  store.ws = ws;
-  store.lastConnectISO = new Date().toISOString();
-  store.lastError = null;
-
-  ws.addEventListener("open", () => {
-    const msg = {
-      APIKey: key,
-      BoundingBoxes: bbox,
-      FilterMessageTypes: ["PositionReport", "ShipStaticData"],
-    };
-    ws.send(JSON.stringify(msg));
-  });
-
-  ws.addEventListener("message", (evt) => {
-    store.lastMessageISO = new Date().toISOString();
-
-    try {
-      const raw = typeof evt.data === "string" ? evt.data : "";
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw);
-      const messageType: string | undefined = parsed?.MessageType;
-      const msg = parsed?.Message;
-      if (!messageType || !msg) return;
-
-      if (messageType === "PositionReport") {
-        const lat = Number(msg?.Latitude);
-        const lon = Number(msg?.Longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-
-        const imo = msg?.IMO ? String(msg.IMO).trim() : undefined;
-        const mmsi = msg?.MMSI ? String(msg.MMSI).trim() : undefined;
-
-        const keyId =
-          imo && /^\d{7}$/.test(imo)
-            ? `IMO:${imo}`
-            : mmsi
-              ? `MMSI:${mmsi}`
-              : null;
-
-        if (!keyId) return;
-
-        const prev = store.positionsByKey.get(keyId);
-
-        store.positionsByKey.set(keyId, {
-          imo,
-          mmsi,
-          lat,
-          lon,
-          sog: msg?.Sog != null ? Number(msg.Sog) : prev?.sog,
-          cog: msg?.Cog != null ? Number(msg.Cog) : prev?.cog,
-          lastSeenISO: new Date().toISOString(),
-        });
-      }
-
-      if (messageType === "ShipStaticData") {
-        const imo = msg?.IMO ? String(msg.IMO).trim() : undefined;
-        const mmsi = msg?.MMSI ? String(msg.MMSI).trim() : undefined;
-        if (!mmsi) return;
-
-        // If we already have MMSI position, mirror it under IMO key
-        const mmsiKey = `MMSI:${mmsi}`;
-        const rec = store.positionsByKey.get(mmsiKey);
-
-        if (rec && imo && /^\d{7}$/.test(imo)) {
-          const imoKey = `IMO:${imo}`;
-          store.positionsByKey.set(imoKey, { ...rec, imo, mmsi });
-        }
-      }
-    } catch {
-      // ignore parse errors
-    }
-  });
-
-  ws.addEventListener("close", () => {
-    store.ws = null;
-  });
-
-  ws.addEventListener("error", () => {
-    store.lastError = "WebSocket error";
-    store.ws = null;
-  });
-}
-
-export async function GET(req: Request) {
-  const store = ensureStore();
-
-  try {
-    const { searchParams } = new URL(req.url);
-    const { preset, cityHall, bbox } = presetConfig(searchParams.get("preset"));
-
-    await connectIfNeeded(bbox);
-
-    const rows: SnapshotRow[] = [];
-    for (const v of store.positionsByKey.values()) {
-      const distanceMi = haversineMiles(cityHall.lat, cityHall.lon, v.lat, v.lon);
-      rows.push({ ...v, distanceMi });
-    }
-
-    rows.sort((a, b) => a.distanceMi - b.distanceMi);
-
-    return NextResponse.json({
-      ok: true,
-      preset,
-      cityHall,
-      bbox,
-      lastConnectISO: store.lastConnectISO,
-      lastMessageISO: store.lastMessageISO,
-      lastError: store.lastError,
-      wsReadyState: store.ws ? store.ws.readyState : null,
-      count: rows.length,
-      vessels: rows.slice(0, 200),
-    });
-  } catch (e: any) {
+  if (!apiKey) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: e?.message || "AIS stream error",
-        lastConnectISO: store.lastConnectISO,
-        lastMessageISO: store.lastMessageISO,
-        lastError: store.lastError,
-        wsReadyState: store.ws ? store.ws.readyState : null,
-      },
+      { ok: false, error: "Missing AISSTREAM_API_KEY" },
       { status: 500 }
     );
   }
+
+  // Collect for a short window so this works on Vercel serverless too.
+  const SAMPLE_MS = 2200;
+
+  const positionsByKey: Record<string, AisVessel> = {};
+  const nowISO = () => new Date().toISOString();
+
+  const wsUrl = "wss://stream.aisstream.io/v0/stream";
+
+  // NOTE: WebSocket is available in Next.js route handlers (Node runtime).
+  const ws = new WebSocket(wsUrl);
+
+  const done = new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      try {
+        ws.close();
+      } catch {}
+      resolve();
+    }, SAMPLE_MS);
+
+    ws.onopen = () => {
+      const msg = {
+        APIKey: apiKey,
+        BoundingBoxes: BBOX,
+        FilterMessageTypes: ["PositionReport", "ShipStaticData"],
+      };
+      ws.send(JSON.stringify(msg));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const raw = JSON.parse(String(event.data || "{}"));
+
+        // AISStream message shape can vary. We’ll handle the common cases:
+        const pr =
+          raw?.Message?.PositionReport ??
+          raw?.Message?.StandardClassBPositionReport ??
+          raw?.Message?.ExtendedClassBPositionReport ??
+          raw?.PositionReport ??
+          null;
+
+        const sd = raw?.Message?.ShipStaticData ?? raw?.ShipStaticData ?? null;
+
+        // Prefer position report when available
+        const lat = pr?.Latitude ?? pr?.lat;
+        const lon = pr?.Longitude ?? pr?.lon;
+
+        // Identify vessel
+        const mmsi =
+          String(pr?.UserID ?? pr?.MMSI ?? sd?.UserID ?? sd?.MMSI ?? "").trim() || undefined;
+
+        // AISStream sometimes supplies IMO in static data
+        const imo =
+          String(sd?.IMO ?? sd?.ImoNumber ?? sd?.IMO_Number ?? "").trim() || undefined;
+
+        if (typeof lat !== "number" || typeof lon !== "number") return;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        if (!inBbox(lat, lon)) return;
+
+        const sogRaw = pr?.Sog ?? pr?.SpeedOverGround ?? pr?.SOG;
+        const cogRaw = pr?.Cog ?? pr?.CourseOverGround ?? pr?.COG;
+
+        const sog =
+          typeof sogRaw === "number" && Number.isFinite(sogRaw) ? sogRaw : undefined;
+
+        // Some feeds use 511/3600/etc for invalid. Filter the obvious invalids.
+        let cog: number | undefined =
+          typeof cogRaw === "number" && Number.isFinite(cogRaw) ? cogRaw : undefined;
+
+        if (cog != null && (cog === 511 || cog < 0 || cog > 360)) cog = undefined;
+
+        const key = imo && /^\d{7}$/.test(imo) ? `imo:${imo}` : mmsi ? `mmsi:${mmsi}` : null;
+        if (!key) return;
+
+        positionsByKey[key] = {
+          imo: imo && /^\d{7}$/.test(imo) ? imo : undefined,
+          mmsi,
+          lat,
+          lon,
+          sog,
+          cog,
+          lastSeenISO: nowISO(),
+          distanceMi: haversineMiles(CITY_HALL, { lat, lon }),
+        };
+      } catch {
+        // ignore bad frames
+      }
+    };
+
+    ws.onerror = () => {
+      clearTimeout(timeout);
+      try {
+        ws.close();
+      } catch {}
+      resolve();
+    };
+
+    ws.onclose = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+  });
+
+  await done;
+
+  const vessels = Object.values(positionsByKey);
+
+  return NextResponse.json({
+    ok: true,
+    cityHall: CITY_HALL,
+    count: vessels.length,
+    vessels,
+    lastConnectISO: new Date().toISOString(),
+  });
 }
