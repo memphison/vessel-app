@@ -148,6 +148,15 @@ export default function HomePage() {
     count: 0,
   });
 
+  // Mobile detection (for layout decisions)
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth <= 480);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   async function loadAis() {
     try {
       const resp = await fetch(`/api/ais-live`, { cache: "no-store" });
@@ -343,7 +352,7 @@ export default function HomePage() {
     });
 
     const aisOnlyEvents: VesselEvent[] = aisOnly.map((v) => ({
-      type: "ARRIVAL", // placeholder; UI will label as "AIS"
+      type: "ARRIVAL", // placeholder; UI will label as "UNDERWAY"
       timeISO: v.lastSeenISO,
       timeLabel: "",
       timeType: "ACTUAL",
@@ -371,11 +380,11 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-       {aisStatus.count === 0
+        {aisStatus.count === 0
           ? "No ships are currently moving through the port"
           : `AIS: ${aisStatus.count} vessels in range`}
         {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
-      </div>  
+      </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
         {events.length} total moves in the {windowLabel}.
@@ -443,7 +452,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {!loading && !error && events.length > 0 && (
+        {!loading && !error && mergedEvents.length > 0 && (
           <div style={{ display: "grid", gap: 12 }}>
             {mergedEvents.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
@@ -457,11 +466,14 @@ export default function HomePage() {
                 (infoImo ? aisByImo[infoImo] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
 
-                // "Soon" callout (only makes sense on the "next" view)
+              // "Soon" callout (only makes sense on the "next" view)
               const soonWindowMinutes = 120;
-
               const msUntil = new Date(e.timeISO).getTime() - Date.now();
-              const isSoon = dir === "next" && Number.isFinite(msUntil) && msUntil >= 0 && msUntil <= soonWindowMinutes * 60_000;
+              const isSoon =
+                dir === "next" &&
+                Number.isFinite(msUntil) &&
+                msUntil >= 0 &&
+                msUntil <= soonWindowMinutes * 60_000;
 
               // Do not show "soon" for AIS-only underway cards
               const isAisOnly = e.status === "AIS-only (not in GA Ports list)";
@@ -475,7 +487,7 @@ export default function HomePage() {
                     : "Next up"
                   : null;
 
-              const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false; // 1 mile threshold
+              const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false;
 
               const geoLine = ais
                 ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${
@@ -498,18 +510,16 @@ export default function HomePage() {
                     }`
                   : null;
 
-
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
+              // Particulars line (no gross tonnage here, we render GT as its own row)
               const particulars =
-                info && (info.vesselType || info.yearBuilt || info.flag || formattedGT)
+                info && (info.vesselType || info.yearBuilt || info.flag)
                   ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
                       info.yearBuilt ? `Built ${info.yearBuilt}` : ""
-                    }${(info.vesselType || info.yearBuilt) && info.flag ? " • " : ""}${
-                      info.flag ? `Flag: ${info.flag}` : ""
-                    }${(info.vesselType || info.yearBuilt || info.flag) && formattedGT ? " • " : ""}${
-                      formattedGT ? `Gross Tonnage ${formattedGT}` : ""
-                    }`.trim()
+                    }${
+                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
+                    }${info.flag ? `Flag: ${info.flag}` : ""}`.trim()
                   : null;
 
               return (
@@ -527,35 +537,48 @@ export default function HomePage() {
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
-                      alignItems: "center",
+                      alignItems: "flex-start",
                       gap: 12,
                       flexWrap: "wrap",
                     }}
                   >
                     {(() => {
-                      const isAisOnly = e.status === "AIS-only (not in GA Ports list)";
-
                       const label = isAisOnly ? "UNDERWAY" : e.type;
-
                       const icon = isAisOnly ? "➡" : e.type === "ARRIVAL" ? "⬇" : "⬆";
-
 
                       const color = isAisOnly
                         ? theme.pageText
                         : e.type === "ARRIVAL"
-                        ? (isDark ? "rgba(140,220,255,0.95)" : "#0b5cab")   // blue-ish
-                        : (isDark ? "rgba(180,255,180,0.95)" : "#1b7f3a"); // green-ish
+                        ? isDark
+                          ? "rgba(140,220,255,0.95)"
+                          : "#0b5cab"
+                        : isDark
+                        ? "rgba(180,255,180,0.95)"
+                        : "#1b7f3a";
 
                       return (
                         <strong style={{ color, letterSpacing: 0.2 }}>
                           <span style={{ marginRight: 6 }}>{icon}</span>
                           {label}
+                          {/* Mobile: put "Departing soon" next to ARRIVAL/DEPARTURE to prevent wrap chaos */}
+                          {isMobile && soonText && (
+                            <span style={{ marginLeft: 8, fontWeight: 600, opacity: 0.9 }}>
+                              · {soonText}
+                            </span>
+                          )}
                         </strong>
                       );
                     })()}
 
-
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        justifyContent: "flex-end",
+                      }}
+                    >
                       <span
                         style={{
                           fontSize: 12,
@@ -576,28 +599,30 @@ export default function HomePage() {
                             ? "#137333"
                             : "#555",
                           fontWeight: 600,
+                          whiteSpace: "nowrap",
                         }}
                       >
                         {e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
-
                       </span>
 
-                        {soonText && (
-                          <span
-                            style={{
-                              fontSize: 12,
-                              padding: "2px 8px",
-                              borderRadius: 999,
-                              background: isDark ? "rgba(255,255,255,0.12)" : "#f3f3f3",
-                              color: isDark ? "rgba(245,245,245,0.9)" : "#111",
-                              fontWeight: 600,
-                            }}
-                          >
-                            {soonText}
-                          </span>
-                        )}
+                      {/* Desktop/tablet: keep pill in the right cluster. Mobile: moved into left label */}
+                      {!isMobile && soonText && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background: isDark ? "rgba(255,255,255,0.12)" : "#f3f3f3",
+                            color: isDark ? "rgba(245,245,245,0.9)" : "#111",
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {soonText}
+                        </span>
+                      )}
 
-                      <strong>{formatDateTime(e.timeISO)}</strong>
+                      <strong style={{ whiteSpace: "nowrap" }}>{formatDateTime(e.timeISO)}</strong>
                     </div>
                   </div>
 
@@ -621,24 +646,25 @@ export default function HomePage() {
                             color: isDark ? "#4da3ff" : "#000080",
                             opacity: isDark ? 0.85 : 0.6,
                             fontWeight: isDark ? 600 : 500,
+                            whiteSpace: "nowrap",
                           }}
                         >
                           ↗ track
                         </span>
                       </a>
-
                     ) : (
                       <span>{e.vesselName}</span>
                     )}
                   </div>
 
-                  <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-                    {e.operator && <span>{e.operator}</span>}
-                    {e.service && <span> • {e.service}</span>}
-                    {e.berth && <span> • Berth {e.berth}</span>}
-                    {e.status && <span> • {e.status}</span>}
-                    {e.imo && <span> • IMO {e.imo}</span>}
-                  </div>
+                  {/* Meta line: remove Berth + IMO for casual users */}
+                  {(e.operator || e.service || e.status) && (
+                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
+                      {e.operator && <span>{e.operator}</span>}
+                      {e.service && <span> • {e.service}</span>}
+                      {e.status && <span> • {e.status}</span>}
+                    </div>
+                  )}
 
                   {geoLine && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
@@ -659,6 +685,12 @@ export default function HomePage() {
 
                   {dims && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>{dims}</div>
+                  )}
+
+                  {formattedGT && (
+                    <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>
+                      Gross tonnage: {formattedGT}
+                    </div>
                   )}
 
                   {particulars && (
