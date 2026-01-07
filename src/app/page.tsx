@@ -158,13 +158,20 @@ export default function HomePage() {
 
       if (!resp.ok || !data?.ok) return;
 
-      const map: Record<string, AisVessel> = {};
-for (const v of data.vessels || []) {
-  const imo = (v.imo || "").trim();
-  if (/^\d{7}$/.test(imo)) map[imo] = v;
-}
+           const byImo: Record<string, AisVessel> = {};
+      const byMmsi: Record<string, AisVessel> = {};
 
-setAisByImo(map);
+      for (const v of data.vessels || []) {
+        const imo = (v.imo || "").trim();
+        const mmsi = (v.mmsi || "").trim();
+
+        if (/^\d{7}$/.test(imo)) byImo[imo] = v;
+        if (/^\d{9}$/.test(mmsi)) byMmsi[mmsi] = v;
+      }
+
+      setAisByImo(byImo);
+      setAisByMmsi(byMmsi);
+
 
       setAisStatus({
         lastUpdated: new Date().toLocaleTimeString(),
@@ -419,10 +426,15 @@ setAisByImo(map);
             {events.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
+                            const eImo = (e.imo || "").trim();
+              const infoImo = (info?.imo || "").trim();
+              const infoMmsi = String((info as any)?.mmsi || "").trim();
+
               const ais =
-                (e.imo ? aisByImo[e.imo] : undefined) ??
-                (info?.imo ? aisByImo[info.imo] : undefined) ??
-                (info as any)?.mmsi ? aisByMmsi[(info as any).mmsi] : undefined;
+                (eImo ? aisByImo[eImo] : undefined) ??
+                (infoImo ? aisByImo[infoImo] : undefined) ??
+                (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
+
 
 
               const nearNow =
