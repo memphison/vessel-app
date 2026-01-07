@@ -33,15 +33,35 @@ export async function GET(req: Request) {
 
   const html = await resp.text();
 
-  // Very lightweight parsing: look for “Label ... </td><td>VALUE</td>”
+    // Very lightweight parsing: look for “Label ... </td><td>VALUE</td>”
+  // Note: In JS strings, regex escapes like \s must be written as \\s.
   function pick(label: string) {
     const re = new RegExp(
-      `${label}[\s\S]{0,220}?</td>\s*<td[^>]*>\s*([^<]+)\s*<`,
+      `${label}[\\s\\S]{0,220}?</td>\\s*<td[^>]*>\\s*([^<]+)\\s*<`,
       "i"
     );
     const m = html.match(re);
     return m ? m[1].trim() : null;
   }
+
+  function pickTdText(label: string) {
+    const re = new RegExp(
+      `${label}[\\s\\S]{0,220}?</td>\\s*<td[^>]*>([\\s\\S]{0,400}?)</td>`,
+      "i"
+    );
+    const m = html.match(re);
+    if (!m) return null;
+
+    const inner = m[1]
+      .replace(/<[^>]*>/g, " ")  // remove tags
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return inner || null;
+  }
+
+
 
   // Extract 1 or 2 meter values from strings like:
   // "262 / 32 m", "262m / 32m", "262.0 m / 32.2 m"
@@ -81,7 +101,8 @@ export async function GET(req: Request) {
   const vesselType = pick("Vessel Type");
   const yearBuilt = pick("Year Built");
   const grossTonnage = pick("Gross Tonnage");
-  const flag = pick("Flag");
+  const flag = pickTdText("Flag") ?? pick("Flag");
+
 
   return NextResponse.json({
     ok: true,
