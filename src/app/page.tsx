@@ -508,7 +508,7 @@ export default function HomePage() {
                       flexWrap: "wrap",
                     }}
                   >
-                    <strong>{e.status === "AIS-only (not in GA Ports list)" ? "AIS" : e.type}</strong>
+                    <strong>{e.status === "AIS-only (not in GA Ports list)" ? "UNDERWAY" : e.type}</strong>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span
