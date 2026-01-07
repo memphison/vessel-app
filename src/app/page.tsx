@@ -532,7 +532,27 @@ export default function HomePage() {
                       flexWrap: "wrap",
                     }}
                   >
-                    <strong>{e.status === "AIS-only (not in GA Ports list)" ? "UNDERWAY" : e.type}</strong>
+                    {(() => {
+                      const isAisOnly = e.status === "AIS-only (not in GA Ports list)";
+
+                      const label = isAisOnly ? "UNDERWAY" : e.type;
+
+                      const icon = isAisOnly ? "➜" : e.type === "ARRIVAL" ? "↓" : "↑";
+
+                      const color = isAisOnly
+                        ? theme.pageText
+                        : e.type === "ARRIVAL"
+                        ? (isDark ? "rgba(140,220,255,0.95)" : "#0b5cab")   // blue-ish
+                        : (isDark ? "rgba(180,255,180,0.95)" : "#1b7f3a"); // green-ish
+
+                      return (
+                        <strong style={{ color, letterSpacing: 0.2 }}>
+                          <span style={{ marginRight: 6 }}>{icon}</span>
+                          {label}
+                        </strong>
+                      );
+                    })()}
+
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span
