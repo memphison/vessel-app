@@ -25,8 +25,13 @@ declare global {
     lastConnectISO: string | null;
     lastMessageISO: string | null;
     lastError: string | null;
-    bboxKey: string | null; // to detect preset/bbox changes
+    bboxKey: string | null;
     positionsByKey: Map<string, AisPosition>;
+
+    // tiny debug helpers (safe)
+    lastRaw?: string | null;
+    lastParsedType?: string | null;
+    lastParsedKeys?: string[] | null;
   } | undefined;
 }
 
@@ -51,6 +56,10 @@ function ensureStore() {
       lastError: null,
       bboxKey: null,
       positionsByKey: new Map<string, AisPosition>(),
+
+      lastRaw: null,
+      lastParsedType: null,
+      lastParsedKeys: null,
     };
   }
   return globalThis.__AISSTREAM__!;
@@ -68,7 +77,7 @@ function presetConfig(presetRaw: string | null) {
   // Savannah (City Hall-ish)
   const city = { lat: 32.08077, lon: -81.0903 };
 
-  // Your tighter box:
+  // TIGHTER Savannah River box (SW, NE) using your provided corners
   // SW corner: 31.968366, -81.169962
   // NE corner: 32.165465, -80.762266
   const bbox: BBox = [[[31.968366, -81.169962], [32.165465, -80.762266]]];
@@ -85,14 +94,54 @@ function closeWs(store: ReturnType<typeof ensureStore>) {
   store.ws = null;
 }
 
-function toNum(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+function normStr(v: any) {
+  const s = String(v ?? "").trim();
+  return s.length ? s : null;
 }
 
-function cleanId(v: any): string | undefined {
-  const s = String(v ?? "").trim();
-  return s ? s : undefined;
+function pickMmsi(parsed: any, msg: any, pr: any, sd: any) {
+  // AISStream often includes MMSI in MetaData
+  return (
+    normStr(parsed?.MetaData?.MMSI) ||
+    normStr(pr?.MMSI) ||
+    normStr(msg?.MMSI) ||
+    normStr(sd?.MMSI) ||
+    normStr(sd?.UserID) ||
+    normStr(parsed?.UserID) ||
+    null
+  );
+}
+
+function pickImo(msg: any, pr: any, sd: any) {
+  // IMO is usually present in ShipStaticData (ImoNumber), sometimes also as IMO
+  const imo =
+    normStr(sd?.ImoNumber) ||
+    normStr(sd?.IMO) ||
+    normStr(msg?.IMO) ||
+    normStr(pr?.IMO) ||
+    null;
+
+  return imo && /^\d{7}$/.test(imo) ? imo : null;
+}
+
+function pickLatLon(pr: any) {
+  const lat = Number(pr?.Latitude ?? pr?.lat ?? pr?.latitude);
+  const lon = Number(pr?.Longitude ?? pr?.lon ?? pr?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
+}
+
+function pickSogCog(pr: any) {
+  const sogRaw = pr?.Sog ?? pr?.sog ?? pr?.SpeedOverGround;
+  const cogRaw = pr?.Cog ?? pr?.cog ?? pr?.CourseOverGround;
+
+  const sog = sogRaw != null && sogRaw !== "" ? Number(sogRaw) : null;
+  const cog = cogRaw != null && cogRaw !== "" ? Number(cogRaw) : null;
+
+  return {
+    sog: Number.isFinite(sog as number) ? (sog as number) : null,
+    cog: Number.isFinite(cog as number) ? (cog as number) : null,
+  };
 }
 
 async function connectIfNeeded(bbox: BBox) {
@@ -103,7 +152,6 @@ async function connectIfNeeded(bbox: BBox) {
 
   const nextKey = JSON.stringify(bbox);
 
-  // If bbox changed, force reconnect + clear old positions
   if (store.bboxKey && store.bboxKey !== nextKey) {
     closeWs(store);
     store.positionsByKey.clear();
@@ -113,7 +161,6 @@ async function connectIfNeeded(bbox: BBox) {
 
   store.bboxKey = nextKey;
 
-  // Already have a WS that is OPEN or CONNECTING
   if (store.ws && (store.ws.readyState === 0 || store.ws.readyState === 1)) return;
 
   const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
@@ -122,84 +169,109 @@ async function connectIfNeeded(bbox: BBox) {
   store.lastError = null;
 
   ws.addEventListener("open", () => {
-    const msg = {
-      APIKey: key,
-      BoundingBoxes: bbox,
-      FilterMessageTypes: ["PositionReport", "ShipStaticData"],
-    };
-    ws.send(JSON.stringify(msg));
+    ws.send(
+      JSON.stringify({
+        APIKey: key,
+        BoundingBoxes: bbox,
+        FilterMessageTypes: ["PositionReport", "ShipStaticData"],
+      })
+    );
   });
 
   ws.addEventListener("message", (evt) => {
     store.lastMessageISO = new Date().toISOString();
 
     try {
-      const raw = typeof evt.data === "string" ? evt.data : "";
-      if (!raw) return;
+     let raw = "";
 
-      const parsed = JSON.parse(raw);
-      const messageType: string | undefined = parsed?.MessageType;
+// Node WebSocket often delivers Buffer or ArrayBuffer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const d: any = (evt as any).data;
+
+if (typeof d === "string") {
+  raw = d;
+} else if (d && typeof d === "object") {
+  // Buffer (common in Node)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const maybeBuffer: any = d;
+  if (typeof maybeBuffer?.toString === "function") {
+    raw = maybeBuffer.toString("utf8");
+  } else if (d instanceof ArrayBuffer) {
+    raw = Buffer.from(d).toString("utf8");
+  } else if (ArrayBuffer.isView(d)) {
+    raw = Buffer.from(d.buffer).toString("utf8");
+  }
+}
+
+if (!raw) {
+  store.lastRaw = null;
+  store.lastParsedType = null;
+  store.lastParsedKeys = null;
+  return;
+}
+
+store.lastRaw = raw;
+
+const parsed = JSON.parse(raw);
+
+      const mt = String(parsed?.MessageType || "").trim();
+      store.lastParsedType = mt || null;
+
       const msg = parsed?.Message;
+      if (!mt || !msg) return;
 
-      // Some frames are keepalives/acks without MessageType
-      if (!messageType || !msg) return;
+      // Helpful for debugging what the message shape is
+      store.lastParsedKeys = msg ? Object.keys(msg) : null;
 
-      if (messageType === "PositionReport") {
-        // Accept BOTH shapes:
-        // msg.PositionReport.Latitude OR msg.Latitude
-        const pr = msg?.PositionReport ?? msg;
+      // AISStream layouts:
+      // - Message.PositionReport.{Latitude,Longitude,Sog,Cog...}
+      // - Message.ShipStaticData.{MMSI,ImoNumber...}
+      const pr = msg?.PositionReport ?? null;
+      const sd = msg?.ShipStaticData ?? null;
 
-        const lat = toNum(pr?.Latitude ?? pr?.Lat ?? pr?.latitude);
-        const lon = toNum(pr?.Longitude ?? pr?.Lon ?? pr?.longitude);
-        if (lat == null || lon == null) return;
+      if (mt === "PositionReport") {
+        const prObj = pr ?? msg; // fallback if provider ever flattens fields
+        const ll = pickLatLon(prObj);
+        if (!ll) return;
 
-        const imo = cleanId(pr?.IMO ?? msg?.IMO);
-        const mmsi = cleanId(pr?.MMSI ?? msg?.MMSI);
+        const mmsi = pickMmsi(parsed, msg, prObj, null);
+        if (!mmsi || !/^\d{9}$/.test(mmsi)) return;
 
-        const keyId =
-          imo && /^\d{7}$/.test(imo)
-            ? `IMO:${imo}`
-            : mmsi && /^\d{9}$/.test(mmsi)
-              ? `MMSI:${mmsi}`
-              : null;
-
-        if (!keyId) return;
-
+        const keyId = `MMSI:${mmsi}`;
         const prev = store.positionsByKey.get(keyId);
 
-        const sog = toNum(pr?.Sog ?? pr?.SOG ?? pr?.SpeedOverGround);
-        const cog = toNum(pr?.Cog ?? pr?.COG ?? pr?.CourseOverGround);
+        const { sog, cog } = pickSogCog(prObj);
 
         store.positionsByKey.set(keyId, {
-          imo,
+          imo: prev?.imo,
           mmsi,
-          lat,
-          lon,
-          sog: sog ?? prev?.sog,
-          cog: cog ?? prev?.cog,
+          lat: ll.lat,
+          lon: ll.lon,
+          sog: sog != null ? sog : prev?.sog,
+          cog: cog != null ? cog : prev?.cog,
           lastSeenISO: new Date().toISOString(),
         });
-
-        return;
       }
 
-      if (messageType === "ShipStaticData") {
-        // Accept BOTH shapes:
-        // msg.ShipStaticData.IMO OR msg.IMO
-        const sd = msg?.ShipStaticData ?? msg;
+      if (mt === "ShipStaticData") {
+        const sdObj = sd ?? msg;
 
-        const imo = cleanId(sd?.IMO ?? msg?.IMO);
-        const mmsi = cleanId(sd?.MMSI ?? msg?.MMSI);
+        const mmsi = pickMmsi(parsed, msg, null, sdObj);
+        const imo = pickImo(msg, null, sdObj);
 
-        // If we already have MMSI position, mirror it under IMO key
         if (!mmsi || !/^\d{9}$/.test(mmsi)) return;
 
         const mmsiKey = `MMSI:${mmsi}`;
         const rec = store.positionsByKey.get(mmsiKey);
 
-        if (rec && imo && /^\d{7}$/.test(imo)) {
-          const imoKey = `IMO:${imo}`;
-          store.positionsByKey.set(imoKey, { ...rec, imo, mmsi });
+        // If we already have a position for this MMSI, attach IMO and also mirror under IMO key
+        if (rec) {
+          const patched = { ...rec, mmsi, imo: imo ?? rec.imo };
+          store.positionsByKey.set(mmsiKey, patched);
+
+          if (imo) {
+            store.positionsByKey.set(`IMO:${imo}`, patched);
+          }
         }
       }
     } catch {
@@ -234,6 +306,8 @@ export async function GET(req: Request) {
 
     rows.sort((a, b) => a.distanceMi - b.distanceMi);
 
+    const debug = searchParams.get("debug") === "1";
+
     return NextResponse.json({
       ok: true,
       preset,
@@ -245,6 +319,16 @@ export async function GET(req: Request) {
       wsReadyState: store.ws ? store.ws.readyState : null,
       count: rows.length,
       vessels: rows.slice(0, 200),
+
+      ...(debug
+        ? {
+            debug: {
+              lastParsedType: store.lastParsedType,
+              lastParsedKeys: store.lastParsedKeys,
+              lastRawPreview: store.lastRaw ? store.lastRaw.slice(0, 280) : null,
+            },
+          }
+        : null),
     });
   } catch (e: any) {
     return NextResponse.json(
