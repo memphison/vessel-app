@@ -649,35 +649,61 @@ export default function HomePage() {
                   </div>
 
                   <div style={{ marginTop: 6, fontSize: 18 }}>
-                    {e.imo ? (
-                      <a
-                        href={`https://www.vesselfinder.com/vessels/details/${e.imo}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          color: isDark ? "#4da3ff" : "#000080",
-                          textDecoration: "underline",
-                          fontWeight: isDark ? 700 : 600,
-                        }}
-                      >
-                        {e.vesselName}
-                        <span
-                          style={{
-                            fontSize: 12,
-                            marginLeft: 6,
-                            color: isDark ? "#4da3ff" : "#000080",
-                            opacity: isDark ? 0.85 : 0.6,
-                            fontWeight: isDark ? 600 : 500,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          ↗ track
-                        </span>
-                      </a>
-                    ) : (
-                      <span>{e.vesselName}</span>
-                    )}
-                  </div>
+  {e.imo ? (
+    <a
+      href={`https://www.vesselfinder.com/vessels/details/${e.imo}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: isDark ? "#4da3ff" : "#000080",
+        textDecoration: "underline",
+        fontWeight: isDark ? 700 : 600,
+      }}
+    >
+      {e.vesselName}
+      <span
+        style={{
+          fontSize: 12,
+          marginLeft: 6,
+          color: isDark ? "#4da3ff" : "#000080",
+          opacity: isDark ? 0.85 : 0.6,
+          fontWeight: isDark ? 600 : 500,
+          whiteSpace: "nowrap",
+        }}
+      >
+        ↗ track
+      </span>
+    </a>
+  ) : e.mmsi ? (
+    <a
+      href={`https://www.vesselfinder.com/?mmsi=${e.mmsi}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        color: isDark ? "#4da3ff" : "#000080",
+        textDecoration: "underline",
+        fontWeight: isDark ? 700 : 600,
+      }}
+    >
+      {e.vesselName}
+      <span
+        style={{
+          fontSize: 12,
+          marginLeft: 6,
+          color: isDark ? "#4da3ff" : "#000080",
+          opacity: isDark ? 0.85 : 0.6,
+          fontWeight: isDark ? 600 : 500,
+          whiteSpace: "nowrap",
+        }}
+      >
+        ↗ track
+      </span>
+    </a>
+  ) : (
+    <span>{e.vesselName}</span>
+  )}
+</div>
+
 
                   {(e.operator || e.service || e.status) && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
