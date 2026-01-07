@@ -587,17 +587,25 @@ export default function HomePage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
-                          color: isDark ? "#4da3ff" : "#000080", // brighter blue in dark mode
+                          color: isDark ? "#4da3ff" : "#000080",
                           textDecoration: "underline",
                           fontWeight: isDark ? 700 : 600,
                         }}
-
                       >
                         {e.vesselName}
-                        <span style={{ fontSize: 12, opacity: 0.6, marginLeft: 6 }}>
-                        ↗ track
-                         </span>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            marginLeft: 6,
+                            color: isDark ? "#4da3ff" : "#000080",
+                            opacity: isDark ? 0.85 : 0.6,
+                            fontWeight: isDark ? 600 : 500,
+                          }}
+                        >
+                          ↗ track
+                        </span>
                       </a>
+
                     ) : (
                       <span>{e.vesselName}</span>
                     )}
