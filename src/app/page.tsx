@@ -54,6 +54,7 @@ function formatDateTime(iso: string) {
 type AisVessel = {
   imo?: string;
   mmsi?: string;
+  name?: string | null; // ✅ used for display if available
   lat: number;
   lon: number;
   sog?: number;
@@ -364,15 +365,21 @@ export default function HomePage() {
         const imo = String(v.imo || "").trim();
         const mmsi = String(v.mmsi || "").trim();
 
-        const name =
-          /^\d{7}$/.test(imo) ? `IMO ${imo}` : /^\d{9}$/.test(mmsi) ? `MMSI ${mmsi}` : "Live AIS";
+        // ✅ CHANGE: Use AIS name first if present, else fall back to IMO/MMSI labels
+        const displayName =
+          (v.name && String(v.name).trim()) ||
+          (/^\d{7}$/.test(imo)
+            ? `IMO ${imo}`
+            : /^\d{9}$/.test(mmsi)
+            ? `MMSI ${mmsi}`
+            : "Live AIS");
 
         return {
           type: "UNDERWAY",
           timeISO: nowISO,
           timeLabel: "Now",
           timeType: "LIVE",
-          vesselName: name,
+          vesselName: displayName,
           imo: /^\d{7}$/.test(imo) ? imo : undefined,
           mmsi: /^\d{9}$/.test(mmsi) ? mmsi : undefined,
           status: "Live AIS (moving)",
@@ -384,7 +391,7 @@ export default function HomePage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl -check</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Live ship movements on the Savannah River in the {windowLabel}. Updated every minute.
@@ -649,61 +656,60 @@ export default function HomePage() {
                   </div>
 
                   <div style={{ marginTop: 6, fontSize: 18 }}>
-  {e.imo ? (
-    <a
-      href={`https://www.vesselfinder.com/vessels/details/${e.imo}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{
-        color: isDark ? "#4da3ff" : "#000080",
-        textDecoration: "underline",
-        fontWeight: isDark ? 700 : 600,
-      }}
-    >
-      {e.vesselName}
-      <span
-        style={{
-          fontSize: 12,
-          marginLeft: 6,
-          color: isDark ? "#4da3ff" : "#000080",
-          opacity: isDark ? 0.85 : 0.6,
-          fontWeight: isDark ? 600 : 500,
-          whiteSpace: "nowrap",
-        }}
-      >
-        ↗ track
-      </span>
-    </a>
-  ) : e.mmsi ? (
-    <a
-      href={`https://www.vesselfinder.com/?mmsi=${e.mmsi}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{
-        color: isDark ? "#4da3ff" : "#000080",
-        textDecoration: "underline",
-        fontWeight: isDark ? 700 : 600,
-      }}
-    >
-      {e.vesselName}
-      <span
-        style={{
-          fontSize: 12,
-          marginLeft: 6,
-          color: isDark ? "#4da3ff" : "#000080",
-          opacity: isDark ? 0.85 : 0.6,
-          fontWeight: isDark ? 600 : 500,
-          whiteSpace: "nowrap",
-        }}
-      >
-        ↗ track
-      </span>
-    </a>
-  ) : (
-    <span>{e.vesselName}</span>
-  )}
-</div>
-
+                    {e.imo ? (
+                      <a
+                        href={`https://www.vesselfinder.com/vessels/details/${e.imo}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: isDark ? "#4da3ff" : "#000080",
+                          textDecoration: "underline",
+                          fontWeight: isDark ? 700 : 600,
+                        }}
+                      >
+                        {e.vesselName}
+                        <span
+                          style={{
+                            fontSize: 12,
+                            marginLeft: 6,
+                            color: isDark ? "#4da3ff" : "#000080",
+                            opacity: isDark ? 0.85 : 0.6,
+                            fontWeight: isDark ? 600 : 500,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          ↗ track
+                        </span>
+                      </a>
+                    ) : e.mmsi ? (
+                      <a
+                        href={`https://www.vesselfinder.com/?mmsi=${e.mmsi}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: isDark ? "#4da3ff" : "#000080",
+                          textDecoration: "underline",
+                          fontWeight: isDark ? 700 : 600,
+                        }}
+                      >
+                        {e.vesselName}
+                        <span
+                          style={{
+                            fontSize: 12,
+                            marginLeft: 6,
+                            color: isDark ? "#4da3ff" : "#000080",
+                            opacity: isDark ? 0.85 : 0.6,
+                            fontWeight: isDark ? 600 : 500,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          ↗ track
+                        </span>
+                      </a>
+                    ) : (
+                      <span>{e.vesselName}</span>
+                    )}
+                  </div>
 
                   {(e.operator || e.service || e.status) && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>

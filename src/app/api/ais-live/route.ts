@@ -7,12 +7,19 @@ type BBox = [[[number, number], [number, number]]];
 type AisPosition = {
   imo?: string;
   mmsi?: string;
+
+  // ✅ from ShipStaticData when available
+  name?: string | null;
+  callsign?: string | null;
+  shipType?: string | number | null;
+
   lat: number;
   lon: number;
   sog?: number; // knots
   cog?: number; // degrees
   lastSeenISO: string;
 };
+
 
 type SnapshotRow = AisPosition & {
   distanceMi: number;
@@ -33,6 +40,7 @@ declare global {
 
         // Static mapping so ShipStaticData can arrive before PositionReport
         imoByMmsi: Map<string, string>;
+        staticByMmsi: Map<string, { name?: string | null; callsign?: string | null; shipType?: any | null }>;
 
         // debug
         lastRaw?: string | null;
@@ -67,6 +75,8 @@ function ensureStore() {
       lastRaw: null,
       lastParsedType: null,
       lastParsedKeys: null,
+      staticByMmsi: new Map(),
+
     };
   }
   return globalThis.__AISSTREAM__!;
@@ -251,26 +261,52 @@ async function connectIfNeeded(bbox: BBox) {
       const prBext = msg?.ExtendedClassBPositionReport ?? null;
       const sd = msg?.ShipStaticData ?? null;
 
-      if (mt === "ShipStaticData") {
-        const sdObj = sd ?? msg;
-        const mmsi = pickMmsi(parsed, msg, null, sdObj);
-        const imo = pickImo(msg, null, sdObj);
+     if (mt === "ShipStaticData") {
+  const sdObj = sd ?? msg;
+  const mmsi = pickMmsi(parsed, msg, null, sdObj);
+  const imo = pickImo(msg, null, sdObj);
 
-        if (mmsi && /^\d{9}$/.test(mmsi) && imo) {
-          store.imoByMmsi.set(mmsi, imo);
+  // ✅ Name fields vary, grab a few common ones
+  const name =
+    normStr(sdObj?.Name) ||
+    normStr(sdObj?.ShipName) ||
+    normStr(sdObj?.VesselName) ||
+    null;
 
-          // If we already have position under MMSI, patch it + mirror under IMO
-          const mmsiKey = `MMSI:${mmsi}`;
-          const rec = store.positionsByKey.get(mmsiKey);
-          if (rec) {
-            const patched = { ...rec, mmsi, imo };
-            store.positionsByKey.set(mmsiKey, patched);
-            store.positionsByKey.set(`IMO:${imo}`, patched);
-          }
-        }
+  const callsign = normStr(sdObj?.CallSign) || null;
+  const shipType = sdObj?.ShipType ?? sdObj?.Type ?? null;
 
-        return;
+  if (mmsi && /^\d{9}$/.test(mmsi)) {
+    // ✅ store static details even if IMO is missing
+    store.staticByMmsi.set(mmsi, { name, callsign, shipType });
+
+    if (imo) {
+      store.imoByMmsi.set(mmsi, imo);
+    }
+
+    // If we already have position under MMSI, patch it with static details
+    const mmsiKey = `MMSI:${mmsi}`;
+    const rec = store.positionsByKey.get(mmsiKey);
+    if (rec) {
+      const patched = {
+        ...rec,
+        mmsi,
+        imo: imo || rec.imo,
+        name: name || rec.name,
+        callsign: callsign || rec.callsign,
+        shipType: shipType ?? rec.shipType,
+      };
+      store.positionsByKey.set(mmsiKey, patched);
+
+      if (patched.imo && /^\d{7}$/.test(patched.imo)) {
+        store.positionsByKey.set(`IMO:${patched.imo}`, patched);
       }
+    }
+  }
+
+  return;
+}
+
 
       // FIX 2: handle PositionReport + BOTH Class B position report types
       if (
@@ -292,6 +328,7 @@ async function connectIfNeeded(bbox: BBox) {
         const { sog, cog } = pickSogCog(prObj);
 
         const imoFromStatic = store.imoByMmsi.get(mmsi) || null;
+        const st = store.staticByMmsi.get(mmsi) || null;
 
         const next: AisPosition = {
           imo: imoFromStatic || prev?.imo,
@@ -301,6 +338,9 @@ async function connectIfNeeded(bbox: BBox) {
           sog: sog != null ? sog : prev?.sog,
           cog: cog != null ? cog : prev?.cog,
           lastSeenISO: new Date().toISOString(),
+          name: st?.name || prev?.name || null,
+          callsign: st?.callsign || prev?.callsign || null,
+          shipType: (st?.shipType ?? prev?.shipType) ?? null,
         };
 
         store.positionsByKey.set(keyId, next);
