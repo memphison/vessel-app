@@ -363,7 +363,7 @@ export default function HomePage() {
       <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
-        All vessel arrivals or departures in the {windowLabel}. Refreshes every minute.
+        Live ship movements on the Savannah River in the {windowLabel}. Updated every minute.
       </p>
 
       <div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
@@ -553,6 +553,9 @@ export default function HomePage() {
                         }}
                       >
                         {e.vesselName}
+                        <span style={{ fontSize: 12, opacity: 0.6, marginLeft: 6 }}>
+                        ↗ details
+                         </span>
                       </a>
                     ) : (
                       <span>{e.vesselName}</span>
