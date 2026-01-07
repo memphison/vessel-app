@@ -384,7 +384,7 @@ export default function HomePage() {
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl -check</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Live ship movements on the Savannah River in the {windowLabel}. Updated every minute.
