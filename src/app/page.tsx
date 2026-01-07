@@ -587,10 +587,11 @@ export default function HomePage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{
-                          color: "#000080",
+                          color: isDark ? "#4da3ff" : "#000080", // brighter blue in dark mode
                           textDecoration: "underline",
-                          fontWeight: 600,
+                          fontWeight: isDark ? 700 : 600,
                         }}
+
                       >
                         {e.vesselName}
                         <span style={{ fontSize: 12, opacity: 0.6, marginLeft: 6 }}>
