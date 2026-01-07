@@ -5,10 +5,7 @@ export async function GET(req: Request) {
   const imo = (searchParams.get("imo") || "").trim();
 
   if (!/^\d{7}$/.test(imo)) {
-    return NextResponse.json(
-      { error: "Invalid IMO (expected 7 digits)." },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid IMO (expected 7 digits)." }, { status: 400 });
   }
 
   // Public vessel particulars page by IMO (dimensions often available)
@@ -25,16 +22,12 @@ export async function GET(req: Request) {
   });
 
   if (!resp.ok) {
-    return NextResponse.json(
-      { error: `Failed to fetch vessel page: ${resp.status}` },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: `Failed to fetch vessel page: ${resp.status}` }, { status: 502 });
   }
 
   const html = await resp.text();
 
-    // Very lightweight parsing: look for “Label ... </td><td>VALUE</td>”
-  // Note: In JS strings, regex escapes like \s must be written as \\s.
+  // Very lightweight parsing: look for “Label ... </td><td>VALUE</td>”
   function pick(label: string) {
     const re = new RegExp(
       `${label}[\\s\\S]{0,220}?</td>\\s*<td[^>]*>\\s*([^<]+)\\s*<`,
@@ -53,7 +46,7 @@ export async function GET(req: Request) {
     if (!m) return null;
 
     const inner = m[1]
-      .replace(/<[^>]*>/g, " ")  // remove tags
+      .replace(/<[^>]*>/g, " ")
       .replace(/&nbsp;/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
@@ -61,13 +54,9 @@ export async function GET(req: Request) {
     return inner || null;
   }
 
-
-
   // Extract 1 or 2 meter values from strings like:
   // "262 / 32 m", "262m / 32m", "262.0 m / 32.2 m"
-  function extractMetersPair(
-    v?: string | null
-  ): { a: string | null; b: string | null } {
+  function extractMetersPair(v?: string | null): { a: string | null; b: string | null } {
     if (!v) return { a: null, b: null };
 
     const nums = (v.match(/\d+(?:\.\d+)?/g) || []).slice(0, 2);
@@ -75,6 +64,23 @@ export async function GET(req: Request) {
     const b = nums[1] ? `${nums[1]}m` : null;
     return { a, b };
   }
+
+  // --- MMSI scraping helpers ---
+  function normalizeMmsi(v?: string | null) {
+    if (!v) return null;
+    const digits = String(v).replace(/[^\d]/g, "");
+    return /^\d{9}$/.test(digits) ? digits : null;
+  }
+
+  // Preferred: table row labeled "MMSI"
+  const mmsiFromLabel = normalizeMmsi(pick("MMSI"));
+
+  // Fallback: sometimes MMSI appears in other parts of the page text
+  // We keep it cautious to avoid false positives.
+  const mmsiFallbackMatch = html.match(/MMSI[^0-9]{0,40}(\d{9})/i);
+  const mmsiFromFallback = mmsiFallbackMatch ? mmsiFallbackMatch[1] : null;
+
+  const mmsi = mmsiFromLabel || mmsiFromFallback;
 
   // Try common variants across different VF layouts:
   const rawLengthOverall = pick("Length Overall");
@@ -103,10 +109,10 @@ export async function GET(req: Request) {
   const grossTonnage = pick("Gross Tonnage");
   const flag = pickTdText("Flag") ?? pick("Flag");
 
-
   return NextResponse.json({
     ok: true,
     imo,
+    mmsi, // ✅ added, enables IMO -> MMSI bridge for AIS matching in the UI
     source: "vesselfinder-html",
 
     // Preferred in UI

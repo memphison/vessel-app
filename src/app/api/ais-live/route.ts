@@ -195,24 +195,29 @@ async function connectIfNeeded(bbox: BBox) {
   store.lastConnectISO = new Date().toISOString();
   store.lastError = null;
 
- ws.addEventListener("open", () => {
-  try {
-    ws.send(
-      JSON.stringify({
-        APIKey: key,
+  ws.addEventListener("open", () => {
+    try {
+      ws.send(
+        JSON.stringify({
+          APIKey: key,
 
-        // ✅ IMPORTANT: bbox is already the correct nesting
-        BoundingBoxes: bbox,
+          // IMPORTANT: AISStream expects an array of bboxes, each bbox is [[swLat,swLon],[neLat,neLon]]
+          // Your bbox var is already that shape.
+          BoundingBoxes: bbox,
 
-        // ✅ Request BOTH so we can map MMSI -> IMO and then match your GA Ports events
-        FilterMessageTypes: ["PositionReport", "ShipStaticData"],
-      })
-    );
-  } catch {
-    store.lastError = "Failed to send subscription";
-  }
-});
-
+          // FIX 1: include Class B position reports so we don't miss vessels like 431332000
+          FilterMessageTypes: [
+            "PositionReport",
+            "StandardClassBPositionReport",
+            "ExtendedClassBPositionReport",
+            "ShipStaticData",
+          ],
+        })
+      );
+    } catch {
+      store.lastError = "Failed to send subscription";
+    }
+  });
 
   ws.addEventListener("message", async (evt) => {
     store.lastMessageISO = new Date().toISOString();
@@ -241,7 +246,9 @@ async function connectIfNeeded(bbox: BBox) {
 
       store.lastParsedKeys = msg ? Object.keys(msg) : null;
 
-      const pr = msg?.PositionReport ?? null;
+      const prA = msg?.PositionReport ?? null;
+      const prB = msg?.StandardClassBPositionReport ?? null;
+      const prBext = msg?.ExtendedClassBPositionReport ?? null;
       const sd = msg?.ShipStaticData ?? null;
 
       if (mt === "ShipStaticData") {
@@ -252,7 +259,7 @@ async function connectIfNeeded(bbox: BBox) {
         if (mmsi && /^\d{9}$/.test(mmsi) && imo) {
           store.imoByMmsi.set(mmsi, imo);
 
-          // If we already have position under MMSI, mirror under IMO now
+          // If we already have position under MMSI, patch it + mirror under IMO
           const mmsiKey = `MMSI:${mmsi}`;
           const rec = store.positionsByKey.get(mmsiKey);
           if (rec) {
@@ -265,8 +272,14 @@ async function connectIfNeeded(bbox: BBox) {
         return;
       }
 
-      if (mt === "PositionReport") {
-        const prObj = pr ?? msg;
+      // FIX 2: handle PositionReport + BOTH Class B position report types
+      if (
+        mt === "PositionReport" ||
+        mt === "StandardClassBPositionReport" ||
+        mt === "ExtendedClassBPositionReport"
+      ) {
+        const prObj = prA ?? prB ?? prBext ?? msg;
+
         const ll = pickLatLon(prObj);
         if (!ll) return;
 
@@ -322,8 +335,22 @@ export async function GET(req: Request) {
 
     await connectIfNeeded(bbox);
 
+    // FIX 3: dedupe so we don't return duplicates from MMSI + IMO mirrored entries
+    // Prefer MMSI records, and attach IMO if we have it.
+    const byMmsi = new Map<string, AisPosition>();
+
+    for (const [k, v] of store.positionsByKey.entries()) {
+      // Only use MMSI:* as the canonical row
+      if (!k.startsWith("MMSI:")) continue;
+      const mmsi = (v.mmsi || "").trim();
+      if (!/^\d{9}$/.test(mmsi)) continue;
+
+      const imo = store.imoByMmsi.get(mmsi) || v.imo;
+      byMmsi.set(mmsi, { ...v, mmsi, imo });
+    }
+
     const rows: SnapshotRow[] = [];
-    for (const v of store.positionsByKey.values()) {
+    for (const v of byMmsi.values()) {
       const distanceMi = haversineMiles(cityHall.lat, cityHall.lon, v.lat, v.lon);
       rows.push({ ...v, distanceMi });
     }
