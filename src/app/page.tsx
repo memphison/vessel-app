@@ -40,9 +40,7 @@ type Window = WindowNext | WindowPast;
 function formatDateTime(iso: string) {
   const d = new Date(iso);
 
-  const date = `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(
-    -2
-  )}`;
+  const date = `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(-2)}`;
 
   const time = d.toLocaleTimeString([], {
     hour: "numeric",
@@ -143,13 +141,12 @@ export default function HomePage() {
 
   const [aisByImo, setAisByImo] = useState<Record<string, AisVessel>>({});
   const [aisByMmsi, setAisByMmsi] = useState<Record<string, AisVessel>>({});
+  const [aisVessels, setAisVessels] = useState<AisVessel[]>([]);
 
-  const [aisStatus, setAisStatus] = useState<{ lastUpdated: string | null; count: number }>(
-    {
-      lastUpdated: null,
-      count: 0,
-    }
-  );
+  const [aisStatus, setAisStatus] = useState<{ lastUpdated: string | null; count: number }>({
+    lastUpdated: null,
+    count: 0,
+  });
 
   async function loadAis() {
     try {
@@ -158,7 +155,7 @@ export default function HomePage() {
 
       if (!resp.ok || !data?.ok) return;
 
-           const byImo: Record<string, AisVessel> = {};
+      const byImo: Record<string, AisVessel> = {};
       const byMmsi: Record<string, AisVessel> = {};
 
       for (const v of data.vessels || []) {
@@ -171,7 +168,7 @@ export default function HomePage() {
 
       setAisByImo(byImo);
       setAisByMmsi(byMmsi);
-
+      setAisVessels(Array.isArray(data.vessels) ? data.vessels : []);
 
       setAisStatus({
         lastUpdated: new Date().toLocaleTimeString(),
@@ -225,11 +222,7 @@ export default function HomePage() {
   const windowLabel = useMemo(() => {
     if (dir === "next") {
       const w = timeWindow as WindowNext;
-      return w === "1h"
-        ? "next hour"
-        : w === "3h"
-        ? "next 3 hours"
-        : "next 24 hours";
+      return w === "1h" ? "next hour" : w === "3h" ? "next 3 hours" : "next 24 hours";
     } else {
       const w = timeWindow as WindowPast;
       return w === "1h" ? "past hour" : w === "3h" ? "past 3 hours" : "past 24 hours";
@@ -334,6 +327,37 @@ export default function HomePage() {
     } as const;
   }
 
+  // ✅ AIS-only cards: if AIS sees a vessel in the bbox but GA Ports JSON no longer lists it,
+  // we still show it (without duplicating any GA Ports cards).
+  const mergedEvents = useMemo(() => {
+    const eventImos = new Set(
+      events
+        .map((ev) => (ev.imo || "").trim())
+        .filter((imo) => /^\d{7}$/.test(imo))
+    );
+
+    const aisOnly = (aisVessels || []).filter((v) => {
+      const imo = (v.imo || "").trim();
+      if (!/^\d{7}$/.test(imo)) return false; // keep dedupe safe: only show AIS-only when IMO is known
+      return !eventImos.has(imo);
+    });
+
+    const aisOnlyEvents: VesselEvent[] = aisOnly.map((v) => ({
+      type: "ARRIVAL", // placeholder; UI will label as "AIS"
+      timeISO: v.lastSeenISO,
+      timeLabel: "",
+      timeType: "ACTUAL",
+      vesselName: "AIS Track",
+      imo: (v.imo || "").trim(),
+      service: undefined,
+      operator: undefined,
+      berth: undefined,
+      status: "AIS-only (not in GA Ports list)",
+    }));
+
+    return [...aisOnlyEvents, ...events];
+  }, [events, aisVessels]);
+
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
       <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
@@ -400,9 +424,7 @@ export default function HomePage() {
       <div style={{ marginTop: 16 }}>
         {loading && <p style={{ color: theme.pageText }}>Loading...</p>}
 
-        {!loading && error && (
-          <p style={{ color: "crimson" }}>{error} Try refreshing the page.</p>
-        )}
+        {!loading && error && <p style={{ color: "crimson" }}>{error} Try refreshing the page.</p>}
 
         {!loading && !error && events.length === 0 && (
           <div
@@ -415,18 +437,16 @@ export default function HomePage() {
             }}
           >
             <strong>No moves in the {windowLabel}.</strong>
-            <div style={{ marginTop: 6, color: theme.subText }}>
-              Try a different time window.
-            </div>
+            <div style={{ marginTop: 6, color: theme.subText }}>Try a different time window.</div>
           </div>
         )}
 
         {!loading && !error && events.length > 0 && (
           <div style={{ display: "grid", gap: 12 }}>
-            {events.map((e, i) => {
+            {mergedEvents.map((e, i) => {
               const info = e.imo ? infoByImo[e.imo] : undefined;
 
-                            const eImo = (e.imo || "").trim();
+              const eImo = (e.imo || "").trim();
               const infoImo = (info?.imo || "").trim();
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
@@ -435,10 +455,7 @@ export default function HomePage() {
                 (infoImo ? aisByImo[infoImo] : undefined) ??
                 (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
 
-
-
-              const nearNow =
-                ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false; // 1 mile threshold
+              const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false; // 1 mile threshold
 
               const geoLine = ais
                 ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${
@@ -455,24 +472,20 @@ export default function HomePage() {
               const { length, width } = getLengthWidth(info);
               const dims =
                 length || width
-                  ? `${length ? `Length ${length}` : ""}${length && width ? " / " : ""}${
-                      width ? `Width ${width}` : ""
-                    }`
+                  ? `${length ? `Length ${length}` : ""}${length && width ? " / " : ""}${width ? `Width ${width}` : ""}`
                   : null;
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
               const particulars =
                 info && (info.vesselType || info.yearBuilt || info.flag || formattedGT)
-                  ? `${info.vesselType || ""}${
-                      info.vesselType && info.yearBuilt ? " • " : ""
-                    }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
-                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-                    }${info.flag ? `Flag: ${info.flag}` : ""}${
-                      (info.vesselType || info.yearBuilt || info.flag) && formattedGT
-                        ? " • "
-                        : ""
-                    }${formattedGT ? `Gross Tonnage ${formattedGT}` : ""}`.trim()
+                  ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
+                      info.yearBuilt ? `Built ${info.yearBuilt}` : ""
+                    }${(info.vesselType || info.yearBuilt) && info.flag ? " • " : ""}${
+                      info.flag ? `Flag: ${info.flag}` : ""
+                    }${(info.vesselType || info.yearBuilt || info.flag) && formattedGT ? " • " : ""}${
+                      formattedGT ? `Gross Tonnage ${formattedGT}` : ""
+                    }`.trim()
                   : null;
 
               return (
@@ -495,7 +508,7 @@ export default function HomePage() {
                       flexWrap: "wrap",
                     }}
                   >
-                    <strong>{e.type}</strong>
+                    <strong>{e.status === "AIS-only (not in GA Ports list)" ? "AIS" : e.type}</strong>
 
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span
@@ -528,25 +541,23 @@ export default function HomePage() {
                   </div>
 
                   <div style={{ marginTop: 6, fontSize: 18 }}>
-  {e.imo ? (
- <a
-  href={`https://www.vesselfinder.com/?imo=${e.imo}`}
-  target="_blank"
-  rel="noopener noreferrer"
-  style={{
-    color: "#000080",          // navy
-    textDecoration: "underline",
-    fontWeight: 600,
-  }}
->
-  {e.vesselName}
-</a>
-
-  ) : (
-    <span>{e.vesselName}</span>
-  )}
-</div>
-
+                    {e.imo ? (
+                      <a
+                        href={`https://www.vesselfinder.com/?imo=${e.imo}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: "#000080",
+                          textDecoration: "underline",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {e.vesselName}
+                      </a>
+                    ) : (
+                      <span>{e.vesselName}</span>
+                    )}
+                  </div>
 
                   <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                     {e.operator && <span>{e.operator}</span>}
@@ -556,7 +567,6 @@ export default function HomePage() {
                     {e.imo && <span> • IMO {e.imo}</span>}
                   </div>
 
-                  {/* ✅ INSERTED GEO OUTPUT (this is what you asked for) */}
                   {geoLine && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
                       {nearNow ? "Near River St now • " : ""}
@@ -565,9 +575,7 @@ export default function HomePage() {
                   )}
 
                   {geoSub && (
-                    <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>
-                      {geoSub}
-                    </div>
+                    <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>{geoSub}</div>
                   )}
 
                   {e.imo && !info && (
@@ -577,9 +585,7 @@ export default function HomePage() {
                   )}
 
                   {dims && (
-                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-                      {dims}
-                    </div>
+                    <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>{dims}</div>
                   )}
 
                   {particulars && (
