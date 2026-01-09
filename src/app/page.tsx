@@ -300,8 +300,9 @@ for (const k of Object.keys(byName)) {
   // Reject known small craft
   if (t != null && t < 70) return false;
 
-  // Speed sanity
-  if ((v.sog ?? 0) < 3) return false;
+  // Speed sanity (allow unknown / slow but moving ships)
+if (v.sog != null && v.sog < 0.5) return false;
+
 
   return true;
 });
@@ -551,7 +552,7 @@ return [...aisUnderwayEvents, ...scheduled];
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl-test</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Big ships moving on the Savannah River in the {windowLabel}.
