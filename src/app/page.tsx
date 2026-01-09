@@ -508,7 +508,7 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-        {aisStatus.count === 0 ? "AIS: no targets in range" : `AIS: ${aisStatus.count} targets in range`}
+        {aisStatus.count === 0 ? "AIS: no moving ships in range" : `AIS: ${aisStatus.count} targets in range`}
         {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
         {aisStatus.count > 0 ? ` • Moving now: ${movingCount}` : ""}
       </div>
