@@ -189,12 +189,14 @@ async function connectIfNeeded(bbox: BBox) {
   const nextKey = JSON.stringify(bbox);
 
   if (store.bboxKey && store.bboxKey !== nextKey) {
-    closeWs(store);
-    store.positionsByKey.clear();
-    store.imoByMmsi.clear();
-    store.lastMessageISO = null;
-    store.lastError = null;
-  }
+  closeWs(store);
+  store.positionsByKey.clear();
+  store.imoByMmsi.clear();
+  store.staticByMmsi.clear(); // ✅ add THIS line here
+  store.lastMessageISO = null;
+  store.lastError = null;
+}
+
 
   store.bboxKey = nextKey;
 
