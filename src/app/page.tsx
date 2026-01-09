@@ -77,6 +77,41 @@ type AisSnapshot = {
   lastConnectISO?: string | null;
 };
 
+function countryToFlagEmoji(country?: string | null) {
+  if (!country) return null;
+
+  const map: Record<string, string> = {
+    Singapore: "SG",
+    Liberia: "LR",
+    Panama: "PA",
+    Bahamas: "BS",
+    Malta: "MT",
+    Cyprus: "CY",
+    Marshall: "MH",
+    "Marshall Islands": "MH",
+    Hong: "HK",
+    "Hong Kong": "HK",
+    China: "CN",
+    USA: "US",
+    "United States": "US",
+    Norway: "NO",
+    Denmark: "DK",
+    Germany: "DE",
+    Italy: "IT",
+    Greece: "GR",
+  };
+
+  const code = map[country.trim()];
+  if (!code) return null;
+
+  return code
+    .toUpperCase()
+    .replace(/./g, (c) =>
+      String.fromCodePoint(127397 + c.charCodeAt(0))
+    );
+}
+
+
 function shipTypeToNumber(raw: unknown): number | null {
   if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
   if (typeof raw === "string") {
@@ -574,12 +609,17 @@ export default function HomePage() {
 
               const particulars =
                 info && (info.vesselType || info.yearBuilt || info.flag)
-                  ? `${info.vesselType || ""}${info.vesselType && info.yearBuilt ? " • " : ""}${
-                      info.yearBuilt ? `Built ${info.yearBuilt}` : ""
-                    }${(info.vesselType || info.yearBuilt) && info.flag ? " • " : ""}${
-                      info.flag ? `Flag: ${info.flag}` : ""
+                  ? `${info.vesselType || ""}${
+                      info.vesselType && info.yearBuilt ? " • " : ""
+                    }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
+                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
+                    }${
+                      info.flag
+                        ? `${countryToFlagEmoji(info.flag) ?? ""}${countryToFlagEmoji(info.flag) ? " " : ""}${info.flag}`
+                        : ""
                     }`.trim()
                   : null;
+
 
               return (
                 <div
