@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE" | "UNDERWAY";
@@ -76,39 +77,75 @@ type AisSnapshot = {
   vessels: AisVessel[];
   lastConnectISO?: string | null;
 };
+function countryNameToIso2(raw?: string | null): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
 
-function countryToFlagEmoji(country?: string | null) {
-  if (!country) return null;
+  // If you ever store ISO-2 directly, accept it.
+  if (/^[A-Za-z]{2}$/.test(s)) return s.toUpperCase();
 
+  const key = s.toLowerCase();
   const map: Record<string, string> = {
-    Singapore: "SG",
-    Liberia: "LR",
-    Panama: "PA",
-    Bahamas: "BS",
-    Malta: "MT",
-    Cyprus: "CY",
-    Marshall: "MH",
-    "Marshall Islands": "MH",
-    Hong: "HK",
-    "Hong Kong": "HK",
-    China: "CN",
-    USA: "US",
-    "United States": "US",
-    Norway: "NO",
-    Denmark: "DK",
-    Germany: "DE",
-    Italy: "IT",
-    Greece: "GR",
+    "united states": "US",
+    "usa": "US",
+    "united kingdom": "GB",
+    "uk": "GB",
+    "england": "GB",
+    "scotland": "GB",
+    "wales": "GB",
+    "germany": "DE",
+    "france": "FR",
+    "spain": "ES",
+    "italy": "IT",
+    "netherlands": "NL",
+    "belgium": "BE",
+    "denmark": "DK",
+    "norway": "NO",
+    "sweden": "SE",
+    "finland": "FI",
+    "ireland": "IE",
+    "poland": "PL",
+    "portugal": "PT",
+    "greece": "GR",
+    "turkey": "TR",
+    "russia": "RU",
+    "ukraine": "UA",
+    "romania": "RO",
+    "bulgaria": "BG",
+    "croatia": "HR",
+    "slovenia": "SI",
+    "cyprus": "CY",
+    "malta": "MT",
+    "panama": "PA",
+    "liberia": "LR",
+    "marshall islands": "MH",
+    "bahamas": "BS",
+    "singapore": "SG",
+    "hong kong": "HK",
+    "china": "CN",
+    "taiwan": "TW",
+    "japan": "JP",
+    "south korea": "KR",
+    "korea": "KR",
+    "india": "IN",
+    "israel": "IL",
+    "egypt": "EG",
+    "south africa": "ZA",
+    "australia": "AU",
+    "new zealand": "NZ",
+    "canada": "CA",
+    "mexico": "MX",
+    "brazil": "BR",
+    "chile": "CL",
+    "argentina": "AR",
   };
 
-  const code = map[country.trim()];
-  if (!code) return null;
+  return map[key] || null;
+}
 
-  return code
-    .toUpperCase()
-    .replace(/./g, (c) =>
-      String.fromCodePoint(127397 + c.charCodeAt(0))
-    );
+function flagImgSrc(iso2: string) {
+  // Small, fast PNGs. If this ever goes down, you can swap the host later.
+  return `https://flagcdn.com/16x12/${iso2.toLowerCase()}.png`;
 }
 
 
@@ -607,18 +644,37 @@ export default function HomePage() {
 
               const formattedGT = formatGrossTonnage(info?.grossTonnage);
 
-              const particulars =
-                info && (info.vesselType || info.yearBuilt || info.flag)
-                  ? `${info.vesselType || ""}${
-                      info.vesselType && info.yearBuilt ? " • " : ""
-                    }${info.yearBuilt ? `Built ${info.yearBuilt}` : ""}${
-                      (info.vesselType || info.yearBuilt) && info.flag ? " • " : ""
-                    }${
-                      info.flag
-                        ? `${countryToFlagEmoji(info.flag) ?? ""}${countryToFlagEmoji(info.flag) ? " " : ""}${info.flag}`
-                        : ""
-                    }`.trim()
-                  : null;
+              const flagIso2 = countryNameToIso2(info?.flag ?? null);
+
+              const particulars: ReactNode | null =
+                info && (info.vesselType || info.yearBuilt || info.flag) ? (
+                  <span>
+                    {info.vesselType ? <>{info.vesselType}</> : null}
+                    {info.vesselType && info.yearBuilt ? " • " : null}
+                    {info.yearBuilt ? <>Built {info.yearBuilt}</> : null}
+                    {(info.vesselType || info.yearBuilt) && info.flag ? " • " : null}
+                    {info.flag ? (
+                      <>
+                        {flagIso2 ? (
+                          <img
+                            src={flagImgSrc(flagIso2)}
+                            alt={info.flag}
+                            width={16}
+                            height={12}
+                            style={{
+                              display: "inline-block",
+                              verticalAlign: "middle",
+                              borderRadius: 2,
+                              marginRight: 6,
+                            }}
+                          />
+                        ) : null}
+                        <span>{info.flag}</span>
+                      </>
+                    ) : null}
+                  </span>
+                ) : null;
+
 
 
               return (
