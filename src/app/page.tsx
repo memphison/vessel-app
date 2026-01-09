@@ -514,7 +514,7 @@ export default function HomePage() {
       </div>
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-        {events.length} scheduled moves in the {windowLabel}.
+        {events.length} scheduled ships moving in the {windowLabel}.
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
@@ -574,7 +574,7 @@ export default function HomePage() {
               color: theme.pageText,
             }}
           >
-            <strong>No moves in the {windowLabel}.</strong>
+            <strong>No ships moving in the {windowLabel}.</strong>
             <div style={{ marginTop: 6, color: theme.subText }}>Try a different time window.</div>
           </div>
         )}
