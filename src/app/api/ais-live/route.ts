@@ -95,7 +95,7 @@ function presetConfig(presetRaw: string | null) {
   const city = { lat: 32.08077, lon: -81.0903 };
 
   // Savannah bbox (SW, NE) in [lat, lon] pairs
-  const bbox: BBox = [[[31.968366, -81.169962], [32.165465, -80.762266]]];
+  const bbox: BBox = [[[31.968366, -81.169962], [32.190078, -80.623403]]];
 
   return { preset: "sav", cityHall: city, bbox };
 }
