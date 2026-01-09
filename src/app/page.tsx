@@ -758,33 +758,38 @@ const ais =
               const flagIso2 = countryNameToIso2(info?.flag ?? null);
 
               const particulars: ReactNode | null =
-                info && (info.vesselType || info.yearBuilt || info.flag) ? (
-                  <span>
-                    {info.vesselType ? <>{info.vesselType}</> : null}
-                    {info.vesselType && info.yearBuilt ? " • " : null}
-                    {info.yearBuilt ? <>Built {info.yearBuilt}</> : null}
-                    {(info.vesselType || info.yearBuilt) && info.flag ? " • " : null}
-                    {info.flag ? (
-                      <>
-                        {flagIso2 ? (
-                          <img
-                            src={flagImgSrc(flagIso2)}
-                            alt={info.flag}
-                            width={16}
-                            height={12}
-                            style={{
-                              display: "inline-block",
-                              verticalAlign: "middle",
-                              borderRadius: 2,
-                              marginRight: 6,
-                            }}
-                          />
-                        ) : null}
-                        <span>{info.flag}</span>
-                      </>
-                    ) : null}
-                  </span>
-                ) : null;
+              info && (info.vesselType || info.flag || info.yearBuilt) ? (
+                <span>
+                  {info.vesselType ? <>{info.vesselType}</> : null}
+
+                  {info.vesselType && info.flag ? " • " : null}
+
+                  {info.flag ? (
+                    <>
+                      {flagIso2 ? (
+                        <img
+                          src={flagImgSrc(flagIso2)}
+                          alt={info.flag}
+                          width={16}
+                          height={12}
+                          style={{
+                            display: "inline-block",
+                            verticalAlign: "middle",
+                            borderRadius: 2,
+                            marginRight: 6,
+                          }}
+                        />
+                      ) : null}
+                      <span>{info.flag}</span>
+                    </>
+                  ) : null}
+
+                  {(info.vesselType || info.flag) && info.yearBuilt ? " • " : null}
+
+                  {info.yearBuilt ? <>Built {info.yearBuilt}</> : null}
+                </span>
+              ) : null;
+
 
 
 
@@ -987,6 +992,13 @@ const ais =
                       <span>{e.vesselName}</span>
                     )}
                   </div>
+                  
+                    {dims && (
+                      <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
+                        {dims}
+                      </div>
+                    )}
+
 
                   {isMmsiOnly && (
                     <div
@@ -1051,7 +1063,7 @@ const ais =
                     <div style={{ marginTop: 6, color: theme.subText, fontSize: 13 }}>Loading vessel details…</div>
                   )}
 
-                  {dims && <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>{dims}</div>}
+              
 
                   {formattedGT && (
                     <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>
