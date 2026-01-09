@@ -500,7 +500,7 @@ export default function HomePage() {
       <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
-        Big ships moving on the Savannah River in the {windowLabel}. Updated every minute.
+        Big ships moving on the Savannah River in the {windowLabel}.
       </p>
 
       <div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
