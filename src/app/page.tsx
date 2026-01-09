@@ -607,12 +607,17 @@ export default function HomePage() {
                 msUntil >= 0 &&
                 msUntil <= soonWindowMinutes * 60_000;
 
+              // Late = scheduled time has passed (and not an UNDERWAY live AIS card)
               const isLate =
-                dir === "next" &&
                 e.type !== "UNDERWAY" &&
+                e.timeType !== "ACTUAL" &&
                 Number.isFinite(msUntil) &&
-                msUntil < 0 &&
-                Math.abs(msUntil) <= lateGraceMinutes * 60_000;
+                msUntil < 0;
+
+              const isLateWithinGrace =
+                isLate && Math.abs(msUntil) <= lateGraceMinutes * 60_000;
+
+
 
               const isImminent =
                 dir === "next" &&
