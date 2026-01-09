@@ -234,6 +234,7 @@ export default function HomePage() {
   const [aisByImo, setAisByImo] = useState<Record<string, AisVessel>>({});
   const [aisByMmsi, setAisByMmsi] = useState<Record<string, AisVessel>>({});
   const [aisVessels, setAisVessels] = useState<AisVessel[]>([]);
+  const [aisByName, setAisByName] = useState<Record<string, AisVessel>>({});
 
   const [aisStatus, setAisStatus] = useState<{ lastUpdated: string | null; count: number }>({
     lastUpdated: null,
@@ -257,19 +258,42 @@ export default function HomePage() {
       if (!resp.ok || !data?.ok) return;
 
       const byImo: Record<string, AisVessel> = {};
-      const byMmsi: Record<string, AisVessel> = {};
+const byMmsi: Record<string, AisVessel> = {};
+const byName: Record<string, AisVessel> = {};
+const nameCounts: Record<string, number> = {};
 
-      for (const v of data.vessels || []) {
-        const imo = (v.imo || "").trim();
-        const mmsi = (v.mmsi || "").trim();
+const normName = (s: string) =>
+  s
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s]/g, "")
+    .trim();
 
-        if (/^\d{7}$/.test(imo)) byImo[imo] = v;
-        if (/^\d{9}$/.test(mmsi)) byMmsi[mmsi] = v;
-      }
+for (const v of data.vessels || []) {
+  const imo = (v.imo || "").trim();
+  const mmsi = (v.mmsi || "").trim();
+
+  if (/^\d{7}$/.test(imo)) byImo[imo] = v;
+  if (/^\d{9}$/.test(mmsi)) byMmsi[mmsi] = v;
+
+  const n = v.name ? normName(v.name) : "";
+  if (n) {
+    nameCounts[n] = (nameCounts[n] || 0) + 1;
+    // temporarily store, we will keep only unique names below
+    byName[n] = v;
+  }
+}
+
+// Only keep unique names (prevents “MSC” duplicates etc.)
+for (const k of Object.keys(byName)) {
+  if ((nameCounts[k] || 0) > 1) delete byName[k];
+}
+
 
       setAisByImo(byImo);
       setAisByMmsi(byMmsi);
       setAisVessels(Array.isArray(data.vessels) ? data.vessels : []);
+      setAisByName(byName);
 
       setAisStatus({
         lastUpdated: new Date().toLocaleTimeString(),
@@ -590,11 +614,22 @@ export default function HomePage() {
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
               // Prefer direct MMSI match first for AIS cards, then IMO
-              const ais =
-                (eMmsi ? aisByMmsi[eMmsi] : undefined) ??
-                (eImo ? aisByImo[eImo] : undefined) ??
-                (infoImo ? aisByImo[infoImo] : undefined) ??
-                (infoMmsi ? aisByMmsi[infoMmsi] : undefined);
+              const normName = (s: string) =>
+  s
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s]/g, "")
+    .trim();
+
+const eNameKey = e.vesselName ? normName(e.vesselName) : "";
+
+const ais =
+  (eMmsi ? aisByMmsi[eMmsi] : undefined) ??
+  (eImo ? aisByImo[eImo] : undefined) ??
+  (infoImo ? aisByImo[infoImo] : undefined) ??
+  (infoMmsi ? aisByMmsi[infoMmsi] : undefined) ??
+  (eNameKey ? aisByName[eNameKey] : undefined);
+
 
               // "Soon" callout (only makes sense on the "next" view). Not for UNDERWAY.
               const soonWindowMinutes = 120;
@@ -640,6 +675,9 @@ export default function HomePage() {
                   : null;
 
               const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false;
+
+              const hasLiveAis = !!ais;
+              const isAisMoving = (ais?.sog ?? 0) >= 0.5;
 
               const geoLine = ais
                 ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${
@@ -786,6 +824,23 @@ export default function HomePage() {
                       >
                         {isUnderway ? "Live AIS" : e.timeType === "ACTUAL" ? "Confirmed time" : "Scheduled"}
                       </span>
+
+                      {!isUnderway && hasLiveAis && (
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "2px 6px",
+                          borderRadius: 6,
+                          background: isDark ? "rgba(77,163,255,0.18)" : "rgba(0,0,128,0.10)",
+                          color: isDark ? "rgba(245,245,245,0.92)" : "#000080",
+                          fontWeight: 700,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Live AIS{isAisMoving ? " • moving" : ""}
+                      </span>
+                    )}
+
 
                       {!isMobile && soonText && (
                         <span
