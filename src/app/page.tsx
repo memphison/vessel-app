@@ -532,7 +532,7 @@ setAisVessels(filtered);
       };
     });
 
-  const filteredEvents =
+const scheduled =
   dir === "next"
     ? events.filter((e) => {
         if (e.type !== "DEPARTURE") return true;
@@ -541,7 +541,9 @@ setAisVessels(filtered);
       })
     : events;
 
-return filteredEvents;
+// Always prepend live AIS movers
+return [...aisUnderwayEvents, ...scheduled];
+
 
 
 }, [events, aisVessels]);
