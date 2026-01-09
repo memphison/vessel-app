@@ -675,13 +675,15 @@ setAisVessels(filtered);
     .trim();
 
 const eNameKey = e.vesselName ? normName(e.vesselName) : "";
-
+const isUnderway = e.type === "UNDERWAY";
 const ais =
+  (isUnderway && eNameKey ? aisByName[eNameKey] : undefined) ??
   (eMmsi ? aisByMmsi[eMmsi] : undefined) ??
   (eImo ? aisByImo[eImo] : undefined) ??
   (infoImo ? aisByImo[infoImo] : undefined) ??
   (infoMmsi ? aisByMmsi[infoMmsi] : undefined) ??
-  (eNameKey ? aisByName[eNameKey] : undefined);
+  (!isUnderway && eNameKey ? aisByName[eNameKey] : undefined);
+
 
 
               // "Soon" callout (only makes sense on the "next" view). Not for UNDERWAY.
@@ -697,13 +699,13 @@ const ais =
 
               // Late = scheduled time has passed (and not an UNDERWAY live AIS card)
               const isLate =
-                e.type !== "UNDERWAY" &&
-                e.timeType !== "ACTUAL" &&
+                e.type === "DEPARTURE" &&
                 Number.isFinite(msUntil) &&
                 msUntil < 0;
 
-              const isLateWithinGrace =
-                isLate && Math.abs(msUntil) <= lateGraceMinutes * 60_000;
+
+              const isLateWithinGrace = false;
+
 
 
 
@@ -714,7 +716,7 @@ const ais =
                 msUntil <= soonWindowMinutes * 60_000 &&
                 msUntil >= -lateGraceMinutes * 60_000;
 
-              const isUnderway = e.type === "UNDERWAY";
+              
               const shipNameUnavailable =
                 isUnderway && (!ais?.name || !String(ais.name).trim());
 
