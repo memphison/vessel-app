@@ -1,129 +1,124 @@
 import { NextResponse } from "next/server";
 
-// -----------------------------
-// Simple in-memory cache
-// -----------------------------
+type VesselInfo = {
+  ok: boolean;
+  imo?: string;
+  mmsi?: string;
 
-type CacheEntry = {
-  data: any;
-  expiresAt: number;
+  lengthM?: string | null;
+  widthM?: string | null;
+
+  loa?: string | null;
+  beam?: string | null;
+
+  vesselType?: string | null;
+  yearBuilt?: string | null;
+  grossTonnage?: string | null;
+  flag?: string | null;
 };
 
-const TTL = 24 * 60 * 60 * 1000; // 24 hours
-const vesselInfoCache = new Map<string, CacheEntry>();
-const inflight = new Map<string, Promise<any>>();
+// -------------------------
+// Server-side cache (24h)
+// -------------------------
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// -----------------------------
-// Helpers
-// -----------------------------
-
-function extractText(html: string, regex: RegExp): string | null {
-  const m = html.match(regex);
-  return m && m[1] ? m[1].trim() : null;
-}
-
-// -----------------------------
-// Route
-// -----------------------------
+const cache = new Map<
+  string,
+  {
+    ts: number;
+    data: VesselInfo;
+  }
+>();
 
 export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const imo = searchParams.get("imo")?.trim() || null;
+  const mmsi = searchParams.get("mmsi")?.trim() || null;
+
+  if (!imo && !mmsi) {
+    return NextResponse.json({ ok: false }, { status: 400 });
+  }
+
+  const cacheKey = imo ? `imo:${imo}` : `mmsi:${mmsi}`;
+
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return NextResponse.json(cached.data);
+  }
+
   try {
-    const { searchParams } = new URL(req.url);
-    const imo = (searchParams.get("imo") || "").trim();
+    const url = imo
+      ? `https://www.vesselfinder.com/vessels/details/${imo}`
+      : `https://www.vesselfinder.com/vessels/details/mmsi/${mmsi}`;
 
-    if (!/^\d{7}$/.test(imo)) {
-      return NextResponse.json({ ok: false }, { status: 400 });
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "The-Waving-Girl/1.0",
+      },
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      throw new Error("VesselFinder request failed");
     }
 
-    const now = Date.now();
+    const html = await res.text();
 
-    // 1) Serve from cache if valid
-    const cached = vesselInfoCache.get(imo);
-    if (cached && cached.expiresAt > now) {
-      return NextResponse.json(cached.data);
-    }
-
-    // 2) If already fetching this IMO, wait for it
-    if (inflight.has(imo)) {
-      const data = await inflight.get(imo)!;
-      return NextResponse.json(data);
-    }
-
-    // 3) Fetch + parse VesselFinder (wrapped)
-    const fetchPromise = (async () => {
-      const resp = await fetch(
-        `https://www.vesselfinder.com/vessels/details/${imo}`,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-          },
-        }
+    const extract = (label: string) => {
+      const re = new RegExp(
+        `${label}\\s*</td>\\s*<td[^>]*>([^<]+)`,
+        "i"
       );
+      const m = html.match(re);
+      return m ? m[1].trim() : null;
+    };
 
-      if (!resp.ok) {
-        throw new Error("VesselFinder request failed");
+    const rawSize = extract("Size");
+
+    let lengthM: string | null = null;
+    let widthM: string | null = null;
+
+    if (rawSize) {
+      const nums = rawSize.match(/\d+(?:\.\d+)?/g);
+      if (nums && nums.length >= 2) {
+        lengthM = `${nums[0]}m`;
+        widthM = `${nums[1]}m`;
       }
-
-      const html = await resp.text();
-
-      // -----------------------------
-      // Parsing (same approach you had)
-      // -----------------------------
-
-      const lengthM =
-        extractText(html, /Length overall<\/td>\s*<td[^>]*>(.*?)<\/td>/i) ??
-        null;
-
-      const widthM =
-        extractText(html, /Breadth<\/td>\s*<td[^>]*>(.*?)<\/td>/i) ??
-        null;
-
-      const vesselType =
-        extractText(html, /Vessel type<\/td>\s*<td[^>]*>(.*?)<\/td>/i) ??
-        null;
-
-      const yearBuilt =
-        extractText(html, /Year of build<\/td>\s*<td[^>]*>(.*?)<\/td>/i) ??
-        null;
-
-      const grossTonnage =
-        extractText(html, /Gross tonnage<\/td>\s*<td[^>]*>(.*?)<\/td>/i) ??
-        null;
-
-      const flag =
-        extractText(html, /Flag<\/td>\s*<td[^>]*>(.*?)<\/td>/i) ??
-        null;
-
-      const result = {
-        ok: true,
-        imo,
-        lengthM,
-        widthM,
-        vesselType,
-        yearBuilt,
-        grossTonnage,
-        flag,
-      };
-
-      // Cache successful result
-      vesselInfoCache.set(imo, {
-        data: result,
-        expiresAt: Date.now() + TTL,
-      });
-
-      return result;
-    })();
-
-    inflight.set(imo, fetchPromise);
-
-    try {
-      const data = await fetchPromise;
-      return NextResponse.json(data);
-    } finally {
-      inflight.delete(imo);
     }
+
+    const data: VesselInfo = {
+      ok: true,
+      imo: imo ?? undefined,
+      mmsi: mmsi ?? undefined,
+
+      // Normalized size (used by UI)
+      lengthM,
+      widthM,
+
+      // Raw fields preserved for fallback
+      loa: extract("Length overall"),
+      beam: extract("Beam"),
+
+      vesselType: extract("Vessel Type"),
+      yearBuilt: extract("Built"),
+      grossTonnage: extract("Gross Tonnage"),
+      flag: extract("Flag"),
+    };
+
+    cache.set(cacheKey, {
+      ts: Date.now(),
+      data,
+    });
+
+    return NextResponse.json(data);
   } catch (err) {
-    return NextResponse.json({ ok: false }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        imo,
+        mmsi,
+      },
+      { status: 500 }
+    );
   }
 }
