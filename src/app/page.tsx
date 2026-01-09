@@ -292,7 +292,20 @@ for (const k of Object.keys(byName)) {
 
       setAisByImo(byImo);
       setAisByMmsi(byMmsi);
-      setAisVessels(Array.isArray(data.vessels) ? data.vessels : []);
+      const filtered = (data.vessels || []).filter((v) => {
+  const t = shipTypeToNumber(v.shipType);
+
+  // Reject known small craft
+  if (t != null && t < 70) return false;
+
+  // Speed sanity
+  if ((v.sog ?? 0) < 3) return false;
+
+  return true;
+});
+
+setAisVessels(filtered);
+
       setAisByName(byName);
 
       setAisStatus({
@@ -305,12 +318,9 @@ for (const k of Object.keys(byName)) {
   }
 
   useEffect(() => {
-    loadAis();
-    const id = setInterval(loadAis, 30_000);
-
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  loadAis();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -471,15 +481,20 @@ for (const k of Object.keys(byName)) {
     .filter((v) => (v.sog ?? 0) >= 0.5)
 
     // Optional "big ship" filter
-    .filter((v) => {
+   .filter((v) => {
   const t = shipTypeToNumber(v.shipType);
+  const hasIMO = /^\d{7}$/.test(String(v.imo || "").trim());
 
-  // Keep vessels with unknown type
-  if (t == null) return true;
+  // IMO ships are always allowed
+  if (hasIMO) return true;
+
+  // MMSI-only ships must be known big types
+  if (t == null) return false;
 
   // Cargo (70–79), Tanker (80–89)
   return t >= 70 && t <= 89;
 })
+
 
 
     .filter((v) => {
@@ -540,6 +555,36 @@ for (const k of Object.keys(byName)) {
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
         {events.length} scheduled ships moving in the {windowLabel}.
       </div>
+
+<div
+  style={{
+    marginTop: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  }}
+>
+  <button
+    onClick={loadAis}
+    style={{
+      padding: "6px 12px",
+      borderRadius: 8,
+      border: `1px solid ${theme.cardBorder}`,
+      background: theme.cardBg,
+      color: theme.pageText,
+      cursor: "pointer",
+      fontWeight: 600,
+    }}
+  >
+    Refresh ships
+  </button>
+
+  <span style={{ fontSize: 13, color: theme.subText }}>
+    Smaller harbor traffic is hidden. Only deep-draft ships are shown.
+  </span>
+</div>
+
 
       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
         {nextButtons.map(({ w, label }) => {
@@ -610,6 +655,8 @@ for (const k of Object.keys(byName)) {
 
               const eImo = (e.imo || "").trim();
               const eMmsi = (e.mmsi || "").trim();
+              const isMmsiOnly = !!eMmsi && !eImo;
+
               const infoImo = (info?.imo || "").trim();
               const infoMmsi = String((info as any)?.mmsi || "").trim();
 
@@ -737,15 +784,17 @@ const ais =
 
               return (
                 <div
-                  key={`${e.type}-${e.timeISO}-${e.imo || ""}-${e.mmsi || ""}-${i}`}
-                  style={{
-                    border: `1px solid ${theme.cardBorder}`,
-                    borderRadius: 12,
-                    padding: 16,
-                    background: theme.cardBg,
-                    color: theme.pageText,
-                  }}
-                >
+              key={`${e.type}-${e.timeISO}-${e.imo || ""}-${e.mmsi || ""}-${i}`}
+              style={{
+                border: `1px solid ${theme.cardBorder}`,
+                borderRadius: 12,
+                padding: 16,
+                background: theme.cardBg,
+                color: theme.pageText,
+                opacity: isMmsiOnly ? 0.9 : 1,
+              }}
+            >
+
                   <div
                     style={{
                       display: "flex",
@@ -932,6 +981,20 @@ const ais =
                       <span>{e.vesselName}</span>
                     )}
                   </div>
+
+                  {isMmsiOnly && (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 13,
+                        color: theme.subText,
+                        fontStyle: "italic",
+                      }}
+                    >
+                      Live AIS target. Details may update.
+                    </div>
+                  )}
+
 
                   {shipNameUnavailable && (
                     <div style={{ marginTop: 6 }}>
