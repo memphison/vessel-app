@@ -598,6 +598,7 @@ export default function HomePage() {
 
               // "Soon" callout (only makes sense on the "next" view). Not for UNDERWAY.
               const soonWindowMinutes = 120;
+              const lateGraceMinutes = 120;
               const msUntil = new Date(e.timeISO).getTime() - Date.now();
               const isSoon =
                 dir === "next" &&
@@ -605,6 +606,20 @@ export default function HomePage() {
                 Number.isFinite(msUntil) &&
                 msUntil >= 0 &&
                 msUntil <= soonWindowMinutes * 60_000;
+
+              const isLate =
+                dir === "next" &&
+                e.type !== "UNDERWAY" &&
+                Number.isFinite(msUntil) &&
+                msUntil < 0 &&
+                Math.abs(msUntil) <= lateGraceMinutes * 60_000;
+
+              const isImminent =
+                dir === "next" &&
+                e.type !== "UNDERWAY" &&
+                Number.isFinite(msUntil) &&
+                msUntil <= soonWindowMinutes * 60_000 &&
+                msUntil >= -lateGraceMinutes * 60_000;
 
               const isUnderway = e.type === "UNDERWAY";
               const shipNameUnavailable =
@@ -780,6 +795,21 @@ export default function HomePage() {
                           }}
                         >
                           {soonText}
+                        </span>
+                      )}
+                      {!isMobile && isLate && (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            background: isDark ? "rgba(255,200,0,0.18)" : "rgba(255,200,0,0.25)",
+                            color: isDark ? "rgba(245,245,245,0.95)" : "#111",
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Late
                         </span>
                       )}
 

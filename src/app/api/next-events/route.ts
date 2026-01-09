@@ -5,6 +5,7 @@ const SOURCE_URL =
   "https://gaports.com/wp-content/uploads/ftp-files/vessel_gct_data.json";
 
 const TZ = "America/New_York";
+const LATE_GRACE_MINUTES = 120;
 
 type VesselRow = {
   name?: string;
@@ -107,7 +108,11 @@ export async function GET(req: Request) {
   const now = DateTime.now().setZone(TZ);
   const hours = hoursFromWindow(window);
 
-  const windowStart = dir === "past" ? now.minus({ hours }) : now;
+  const windowStart =
+  dir === "past"
+    ? now.minus({ hours })
+    : now.minus({ minutes: LATE_GRACE_MINUTES });
+
   const windowEnd = dir === "past" ? now : now.plus({ hours });
 
   const events: VesselEvent[] = [];
