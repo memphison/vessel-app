@@ -221,6 +221,8 @@ function getLengthWidth(info?: VesselInfo) {
 }
 
 export default function HomePage() {
+  const lateGraceMinutes = 120;
+
   const [events, setEvents] = useState<VesselEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -530,7 +532,17 @@ setAisVessels(filtered);
       };
     });
 
-  return [...aisUnderwayEvents, ...events];
+  const filteredEvents =
+  dir === "next"
+    ? events.filter((e) => {
+        if (e.type !== "DEPARTURE") return true;
+        const delta = new Date(e.timeISO).getTime() - Date.now();
+        return delta >= -lateGraceMinutes * 60_000;
+      })
+    : events;
+
+return [...aisUnderwayEvents, ...filteredEvents];
+
 }, [events, aisVessels]);
 
 
@@ -676,19 +688,21 @@ setAisVessels(filtered);
 
 const eNameKey = e.vesselName ? normName(e.vesselName) : "";
 const isUnderway = e.type === "UNDERWAY";
-const ais =
-  (isUnderway && eNameKey ? aisByName[eNameKey] : undefined) ??
-  (eMmsi ? aisByMmsi[eMmsi] : undefined) ??
+const ais: AisVessel | undefined =
   (eImo ? aisByImo[eImo] : undefined) ??
   (infoImo ? aisByImo[infoImo] : undefined) ??
+  (eMmsi ? aisByMmsi[eMmsi] : undefined) ??
   (infoMmsi ? aisByMmsi[infoMmsi] : undefined) ??
-  (!isUnderway && eNameKey ? aisByName[eNameKey] : undefined);
+  (eNameKey ? aisByName[eNameKey] : undefined);
+
+
+
 
 
 
               // "Soon" callout (only makes sense on the "next" view). Not for UNDERWAY.
               const soonWindowMinutes = 120;
-              const lateGraceMinutes = 120;
+             
               const msUntil = new Date(e.timeISO).getTime() - Date.now();
               const isSoon =
                 dir === "next" &&
@@ -704,7 +718,12 @@ const ais =
                 msUntil < 0;
 
 
-              const isLateWithinGrace = false;
+              const isLateWithinGrace =
+  e.type === "DEPARTURE" &&
+  Number.isFinite(msUntil) &&
+  msUntil < 0 &&
+  Math.abs(msUntil) <= lateGraceMinutes * 60_000;
+
 
 
 
@@ -718,7 +737,8 @@ const ais =
 
               
               const shipNameUnavailable =
-                isUnderway && (!ais?.name || !String(ais.name).trim());
+  isUnderway && (!ais || !ais.name || !ais.name.trim());
+
 
               const soonText =
                 !isUnderway && isSoon
