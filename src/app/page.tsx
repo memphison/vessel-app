@@ -565,20 +565,24 @@ setAisVessels(filtered);
     flexWrap: "wrap",
   }}
 >
-  <button
-    onClick={loadAis}
-    style={{
-      padding: "6px 12px",
-      borderRadius: 8,
-      border: `1px solid ${theme.cardBorder}`,
-      background: theme.cardBg,
-      color: theme.pageText,
-      cursor: "pointer",
-      fontWeight: 600,
-    }}
-  >
-    Refresh ships
-  </button>
+ <button
+  onClick={() => {
+    loadAis();
+    load(dir, timeWindow);
+  }}
+  style={{
+    padding: "6px 12px",
+    borderRadius: 8,
+    border: `1px solid ${theme.cardBorder}`,
+    background: theme.cardBg,
+    color: theme.pageText,
+    cursor: "pointer",
+    fontWeight: 600,
+  }}
+>
+  Refresh ships
+</button>
+
 
   <span style={{ fontSize: 13, color: theme.subText }}>
     Smaller harbor traffic is hidden. Only deep-draft ships are shown.
