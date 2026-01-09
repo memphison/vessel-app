@@ -108,20 +108,18 @@ export async function GET(req: Request) {
   const now = DateTime.now().setZone(TZ);
   const hours = hoursFromWindow(window);
 
-  // Grace period: keep missed scheduled times in "next" for a bit (so they don't immediately fall into "past")
-const LATE_GRACE_MINUTES = 60;
+    // Grace period: keep missed scheduled times in "next" for a bit
+  // Also exclude that same grace window from "past" so late ships do not appear in both lists.
+  const windowStart =
+    dir === "past"
+      ? now.minus({ hours })
+      : now.minus({ minutes: LATE_GRACE_MINUTES });
 
-// For "next": allow items scheduled slightly BEFORE now (late-but-still-relevant)
-const windowStart =
-  dir === "past"
-    ? now.minus({ hours })
-    : now.minus({ minutes: LATE_GRACE_MINUTES });
+  const windowEnd =
+    dir === "past"
+      ? now.minus({ minutes: LATE_GRACE_MINUTES })
+      : now.plus({ hours });
 
-// For "past": do NOT include the most recent grace window (those belong in "next" until grace expires)
-const windowEnd =
-  dir === "past"
-    ? now.minus({ minutes: LATE_GRACE_MINUTES })
-    : now.plus({ hours });
 
 
   const events: VesselEvent[] = [];
