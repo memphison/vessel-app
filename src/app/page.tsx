@@ -542,15 +542,17 @@ setAisVessels(filtered);
         Big ships moving on the Savannah River in the {windowLabel}.
       </p>
 
-      <div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
-        {lastUpdated ? `Last updated: ${lastUpdated}` : "Last updated: —"}
-      </div>
+     <div style={{ marginTop: 8, color: theme.subText, fontSize: 14 }}>
+  {lastUpdated ? `Last refreshed at ${lastUpdated}` : "Last refreshed: —"}
+</div>
+
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
-        {aisStatus.count === 0 ? "AIS: no moving ships in range" : `AIS: ${aisStatus.count} targets in range`}
-        {aisStatus.lastUpdated ? ` • Updated: ${aisStatus.lastUpdated}` : ""}
-        {aisStatus.count > 0 ? ` • Moving now: ${movingCount}` : ""}
-      </div>
+  {movingCount === 0
+    ? "Live ship tracking: no large ships moving nearby"
+    : `Live ship tracking: ${movingCount} large ship${movingCount === 1 ? "" : "s"} moving now`}
+</div>
+
 
       <div style={{ marginTop: 6, color: theme.subText, fontSize: 14 }}>
         {events.length} scheduled ships moving in the {windowLabel}.
