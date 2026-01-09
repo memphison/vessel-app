@@ -752,7 +752,12 @@ const ais: AisVessel | undefined =
               const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false;
 
               const hasLiveAis = !!ais;
-              const isAisMoving = (ais?.sog ?? 0) >= 0.5;
+            const isAisMoving =
+                !!ais &&
+                typeof ais.sog === "number" &&
+                ais.sog >= 0.5;
+
+
 
               const geoLine = ais
                 ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${
