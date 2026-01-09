@@ -77,6 +77,18 @@ type AisSnapshot = {
   lastConnectISO?: string | null;
 };
 
+function shipTypeToNumber(raw: unknown): number | null {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === "string") {
+    const m = raw.match(/\d+/);
+    if (!m) return null;
+    const n = Number(m[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+
 function formatGrossTonnage(gt?: string | null) {
   if (!gt) return null;
   const num = Number(String(gt).replace(/[^\d]/g, ""));
@@ -364,21 +376,15 @@ export default function HomePage() {
 
     // Optional "big ship" filter
     .filter((v) => {
-      const raw = v.shipType;
+  const t = shipTypeToNumber(v.shipType);
 
-      // keep unknown types for now
-      if (raw == null) return true;
+  // Keep vessels with unknown type
+  if (t == null) return true;
 
-      const t =
-        typeof raw === "number"
-          ? raw
-          : Number(String(raw).trim().match(/\d+/)?.[0]);
+  // Cargo (70–79), Tanker (80–89)
+  return t >= 70 && t <= 89;
+})
 
-      // if we can't parse a numeric type, keep it for now
-      if (!Number.isFinite(t)) return true;
-
-      return t >= 70 && t <= 89;
-    })
 
     .filter((v) => {
       const mmsi = String(v.mmsi || "").trim();
@@ -529,6 +535,8 @@ export default function HomePage() {
                 msUntil <= soonWindowMinutes * 60_000;
 
               const isUnderway = e.type === "UNDERWAY";
+              const shipNameUnavailable =
+                isUnderway && (!ais?.name || !String(ais.name).trim());
 
               const soonText =
                 !isUnderway && isSoon
@@ -738,6 +746,25 @@ export default function HomePage() {
                       <span>{e.vesselName}</span>
                     )}
                   </div>
+
+                  {shipNameUnavailable && (
+                    <div style={{ marginTop: 6 }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          fontSize: 12,
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          background: isDark ? "rgba(255,255,255,0.10)" : "#f3f3f3",
+                          color: isDark ? "rgba(245,245,245,0.85)" : "#555",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Ship name unavailable
+                      </span>
+                    </div>
+                  )}
+
 
                   {(e.operator || e.service || e.status) && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
