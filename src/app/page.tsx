@@ -63,8 +63,8 @@ type AisVessel = {
 
   lat: number;
   lon: number;
-  sog?: number;
-  cog?: number;
+  sog?: number | null;
+  cog?: number | null;
   lastSeenISO: string;
   distanceMi: number;
 };
@@ -481,22 +481,25 @@ setAisVessels(filtered);
   const nowISO = new Date().toISOString();
 
   const aisUnderwayEvents: VesselEvent[] = (aisVessels || [])
-    .filter((v) => (v.sog ?? 0) >= 0.5)
-
-    // Optional "big ship" filter
-   .filter((v) => {
+    .filter((v) => {
   const t = shipTypeToNumber(v.shipType);
   const hasIMO = /^\d{7}$/.test(String(v.imo || "").trim());
 
   // IMO ships are always allowed
-  if (hasIMO) return true;
+  if (hasIMO) {
+    return true;
+  }
 
-  // MMSI-only ships must be known big types
-  if (t == null) return false;
+  // MMSI-only ships with known large ship types
+  if (t != null) {
+    return t >= 70 && t <= 89;
+  }
 
-  // Cargo (70–79), Tanker (80–89)
-  return t >= 70 && t <= 89;
+  // Fallback: MMSI-only large ships sometimes lack shipType
+  // Allow if clearly moving
+  return typeof v.sog === "number" && v.sog >= 5;
 })
+
 
 
 
@@ -538,7 +541,13 @@ const scheduled =
     ? events.filter((e) => {
         if (e.type !== "DEPARTURE") return true;
         const delta = new Date(e.timeISO).getTime() - Date.now();
-        return delta >= -lateGraceMinutes * 60_000;
+        // For NEXT view
+if (dir === "next") {
+  if (e.type === "DEPARTURE" && e.timeType === "ACTUAL") return false;
+  return delta >= -lateGraceMinutes * 60_000;
+
+}
+
       })
     : events;
 
@@ -763,11 +772,14 @@ const ais: AisVessel | undefined =
 
 
 
-              const geoLine = ais
-                ? `Distance ${ais.distanceMi.toFixed(2)} mi • Speed ${
-                    ais.sog != null ? ais.sog.toFixed(1) : "—"
-                  } kn • Course ${ais.cog != null ? Math.round(ais.cog) + "°" : "—"}`
-                : null;
+              const geoLine =
+  ais && typeof ais.sog === "number"
+    ? `Speed ${ais.sog.toFixed(1)} kn • Course ${
+        typeof ais.cog === "number" ? Math.round(ais.cog) + "°" : "—"
+      }`
+    : null;
+
+
 
               const geoSub = ais
                 ? `Lat ${ais.lat.toFixed(5)} • Lon ${ais.lon.toFixed(5)} • Seen ${new Date(
@@ -1083,8 +1095,12 @@ const ais: AisVessel | undefined =
                   
                   {geoLine && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-                      {nearNow ? "Near River St now • " : ""}
-                      {geoLine}
+                      {nearNow && ais
+  ? `Near River St now • Distance ${ais.distanceMi.toFixed(2)} mi • `
+  : ""}
+
+{geoLine}
+
                     </div>
                   )}
 

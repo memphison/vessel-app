@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { DateTime } from "luxon";
 
+// This is the next-events route file
+
 const SOURCE_URL =
   "https://gaports.com/wp-content/uploads/ftp-files/vessel_gct_data.json";
 

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+// This is the ais-live route file
+
 export const runtime = "nodejs"; // WebSocket not supported in Edge
 
 type BBox = [[[number, number], [number, number]]];

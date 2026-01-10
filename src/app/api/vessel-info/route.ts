@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+// This is the vessel-info route file
+
 type VesselInfo = {
   ok: boolean;
   imo?: string;
@@ -30,10 +32,13 @@ const cache = new Map<
   }
 >();
 
+
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const imo = searchParams.get("imo")?.trim() || null;
   const mmsi = searchParams.get("mmsi")?.trim() || null;
+  
 
   if (!imo && !mmsi) {
     return NextResponse.json({ ok: false }, { status: 400 });
@@ -57,6 +62,8 @@ export async function GET(req: Request) {
       },
       cache: "no-store",
     });
+
+
 
     if (!res.ok) {
       throw new Error("VesselFinder request failed");
@@ -86,7 +93,7 @@ export async function GET(req: Request) {
       }
     }
 
-    const data: VesselInfo = {
+    const response: VesselInfo = {
       ok: true,
       imo: imo ?? undefined,
       mmsi: mmsi ?? undefined,
@@ -105,12 +112,18 @@ export async function GET(req: Request) {
       flag: extract("Flag"),
     };
 
-    cache.set(cacheKey, {
-      ts: Date.now(),
-      data,
-    });
 
-    return NextResponse.json(data);
+    
+    cache.set(cacheKey, {
+  ts: Date.now(),
+  data: response,
+});
+
+
+   return NextResponse.json(response);
+
+
+
   } catch (err) {
     return NextResponse.json(
       {
