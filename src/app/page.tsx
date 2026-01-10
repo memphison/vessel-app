@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+// Retain AIS hits briefly to survive feed drops
+const AIS_RETENTION_MS = 2 * 60 * 1000; // 2 minutes
+
+
 type VesselEvent = {
   type: "ARRIVAL" | "DEPARTURE" | "UNDERWAY";
   timeISO: string;
@@ -257,7 +261,11 @@ export default function HomePage() {
       const resp = await fetch(`/api/ais-live`, { cache: "no-store" });
       const data: AisSnapshot = await resp.json();
 
-      if (!resp.ok || !data?.ok) return;
+      if (!resp.ok || !data?.ok || !Array.isArray(data.vessels) || data.vessels.length === 0) {
+  // Do NOT clear existing AIS state on empty or flaky feed
+  return;
+}
+
 
       const byImo: Record<string, AisVessel> = {};
 const byMmsi: Record<string, AisVessel> = {};
@@ -292,26 +300,51 @@ for (const k of Object.keys(byName)) {
 }
 
 
-      setAisByImo(byImo);
-      setAisByMmsi(byMmsi);
+      setAisByImo((prev) => ({ ...prev, ...byImo }));
+setAisByMmsi((prev) => ({ ...prev, ...byMmsi }));
+
       const filtered = (data.vessels || []).filter((v) => {
   const t = shipTypeToNumber(v.shipType);
 
-  // Reject known small craft
+  // Explicitly drop known small craft
   if (t != null && t < 70) return false;
 
-  // Speed sanity (allow unknown / slow but moving ships)
-// Do not drop stationary ships near port
-if (v.sog != null && v.sog < 0.5 && v.distanceMi > 5) return false;
+  // Keep unknown-type ships if they are reasonably close
+  if (t == null && typeof v.distanceMi === "number" && v.distanceMi <= 10) {
+    return true;
+  }
 
-
+  // Speed sanity: drop distant stationary clutter
+  if (v.sog != null && v.sog < 0.5 && v.distanceMi > 8) return false;
 
   return true;
 });
 
-setAisVessels(filtered);
+
+setAisVessels((prev) => {
+  const now = Date.now();
+
+  const freshPrev = prev.filter(
+    (v) => now - new Date(v.lastSeenISO).getTime() <= AIS_RETENTION_MS
+  );
+
+  const merged = [...freshPrev];
+
+  for (const v of filtered) {
+    const idx = merged.findIndex((p) => p.mmsi === v.mmsi);
+    if (idx >= 0) merged[idx] = v;
+    else merged.push(v);
+  }
+
+  return merged;
+});
+
+
+
 
       setAisByName(byName);
+
+
 
       setAisStatus({
         lastUpdated: new Date().toLocaleTimeString(),
@@ -324,8 +357,11 @@ setAisVessels(filtered);
 
   useEffect(() => {
   loadAis();
+  const id = setInterval(loadAis, 15_000); // poll every 15s
+  return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
+
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -483,9 +519,10 @@ setAisVessels(filtered);
   const nowISO = new Date().toISOString();
 
   const aisUnderwayEvents: VesselEvent[] = (aisVessels || [])
-   .filter((v) => {
+  .filter((v) => {
   const t = shipTypeToNumber(v.shipType);
   const hasIMO = /^\d{7}$/.test(String(v.imo || "").trim());
+  const hasMMSI = /^\d{9}$/.test(String(v.mmsi || "").trim());
 
   // IMO ships always allowed
   if (hasIMO) return true;
@@ -493,9 +530,12 @@ setAisVessels(filtered);
   // Known large ship types
   if (t != null) return t >= 70;
 
-  // MMSI-only fallback: allow if within port radius
-  return typeof v.distanceMi === "number" && v.distanceMi <= 8;
+  // MMSI-only but clearly moving ships are allowed
+  if (hasMMSI && typeof v.sog === "number" && v.sog >= 1.0) return true;
+
+  return false;
 })
+
 
 
 
@@ -559,7 +599,7 @@ return [...aisUnderwayEvents, ...scheduled];
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl-test</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Big ships moving on the Savannah River in the {windowLabel}.
@@ -706,6 +746,10 @@ const ais: AisVessel | undefined =
   (infoMmsi ? aisByMmsi[infoMmsi] : undefined) ??
   (eNameKey ? aisByName[eNameKey] : undefined);
 
+const aisStable = ais && new Date(ais.lastSeenISO).getTime() > Date.now() - AIS_RETENTION_MS
+  ? ais
+  : undefined;
+
 
 
 
@@ -748,7 +792,7 @@ const ais: AisVessel | undefined =
 
               
               const shipNameUnavailable =
-  isUnderway && (!ais || !ais.name || !ais.name.trim());
+  isUnderway && (!aisStable || !aisStable.name || !aisStable.name.trim());
 
 
               const soonText =
@@ -760,28 +804,28 @@ const ais: AisVessel | undefined =
                     : "Next up"
                   : null;
 
-              const nearNow = ais && Number.isFinite(ais.distanceMi) ? ais.distanceMi <= 1.0 : false;
+              const nearNow = aisStable && Number.isFinite(aisStable.distanceMi) ? aisStable.distanceMi <= 1.0 : false;
 
-              const hasLiveAis = !!ais;
+              const hasLiveAis = !!aisStable;
             const isAisMoving =
-                !!ais &&
-                typeof ais.sog === "number" &&
-                ais.sog >= 0.5;
+                !!aisStable &&
+                typeof aisStable.sog === "number" &&
+                aisStable.sog >= 0.5;
 
 
 
               const geoLine =
-  ais && typeof ais.sog === "number"
-    ? `Speed ${ais.sog.toFixed(1)} kn • Course ${
-        typeof ais.cog === "number" ? Math.round(ais.cog) + "°" : "—"
+  aisStable && typeof aisStable.sog === "number"
+    ? `Speed ${aisStable.sog.toFixed(1)} kn • Course ${
+        typeof aisStable.cog === "number" ? Math.round(aisStable.cog) + "°" : "—"
       }`
     : null;
 
 
 
-              const geoSub = ais
-                ? `Lat ${ais.lat.toFixed(5)} • Lon ${ais.lon.toFixed(5)} • Seen ${new Date(
-                    ais.lastSeenISO
+              const geoSub = aisStable
+                ? `Lat ${aisStable.lat.toFixed(5)} • Lon ${aisStable.lon.toFixed(5)} • Seen ${new Date(
+                    aisStable.lastSeenISO
                   ).toLocaleTimeString()}`
                 : null;
 
@@ -1081,11 +1125,11 @@ const ais: AisVessel | undefined =
                       {e.status && <span> • {e.status}</span>}
                     </div>
                   )}
-                  {ais && (ais.callsign || ais.shipType != null) && (
+                  {aisStable && (aisStable.callsign || aisStable.shipType != null) && (
   <div style={{ marginTop: 4, color: theme.subText, fontSize: 13 }}>
-    {ais.callsign ? <>Callsign: {ais.callsign}</> : null}
-    {ais.callsign && ais.shipType != null ? " • " : null}
-    {ais.shipType != null ? <>Type: {ais.shipType}</> : null}
+    {aisStable.callsign ? <>Callsign: {aisStable.callsign}</> : null}
+    {aisStable.callsign && aisStable.shipType != null ? " • " : null}
+    {aisStable.shipType != null ? <>Type: {aisStable.shipType}</> : null}
   </div>
 )}
 
@@ -1093,8 +1137,8 @@ const ais: AisVessel | undefined =
                   
                   {geoLine && (
                     <div style={{ marginTop: 6, color: theme.metaText, fontSize: 14 }}>
-                      {nearNow && ais
-  ? `Near River St now • Distance ${ais.distanceMi.toFixed(2)} mi • `
+                      {nearNow && aisStable
+  ? `Near River St now • Distance ${aisStable.distanceMi.toFixed(2)} mi • `
   : ""}
 
 {geoLine}
