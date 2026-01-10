@@ -1,6 +1,9 @@
 import Database from "better-sqlite3";
 
-export const db = new Database("ais.db");
+export const db = new Database(
+  process.env.AIS_DB_PATH || "C:/vessels-app/vessels-app/ais.db"
+);
+
 
 // Run once on startup
 db.exec(`

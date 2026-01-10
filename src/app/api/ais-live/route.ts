@@ -287,6 +287,49 @@ async function connectIfNeeded(bbox: BBox) {
   const callsign = normStr(sdObj?.CallSign) || null;
   const shipType = sdObj?.ShipType ?? sdObj?.Type ?? null;
 
+  // 🔥 CRITICAL: backfill static data into SQLite
+if (mmsi && /^\d{9}$/.test(mmsi)) {
+  const now = Date.now();
+
+  db.prepare(`
+    UPDATE ais_snapshots
+    SET
+      imo = COALESCE(?, imo),
+      name = COALESCE(?, name),
+      shipType = COALESCE(?, shipType),
+      updatedAt = ?
+    WHERE mmsi = ?
+  `).run(
+    imo ?? null,
+    name ?? null,
+    typeof shipType === "number" ? shipType : null,
+    now,
+    mmsi
+  );
+
+  db.prepare(`
+    INSERT INTO vessel_identity (
+      imo,
+      mmsi,
+      name,
+      firstSeenAt,
+      lastSeenAt
+    )
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(mmsi) DO UPDATE SET
+      imo = COALESCE(excluded.imo, vessel_identity.imo),
+      name = COALESCE(excluded.name, vessel_identity.name),
+      lastSeenAt = excluded.lastSeenAt
+  `).run(
+    imo ?? null,
+    mmsi,
+    name ?? null,
+    now,
+    now
+  );
+}
+
+
   if (mmsi && /^\d{9}$/.test(mmsi)) {
   // ✅ store static details even if IMO is missing
   store.staticByMmsi.set(mmsi, { name, callsign, shipType });
