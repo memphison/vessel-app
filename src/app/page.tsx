@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 // Retain AIS hits briefly to survive feed drops
-const AIS_RETENTION_MS = 10 * 60 * 1000; // 2 minutes
+const AIS_RETENTION_MS = 10 * 60 * 1000; // 10 minutes
 
 
 type VesselEvent = {
@@ -599,7 +599,7 @@ return [...aisUnderwayEvents, ...scheduled];
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl-test</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Big ships moving on the Savannah River in the {windowLabel}.

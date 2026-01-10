@@ -186,6 +186,11 @@ async function dataToText(d: any): Promise<string> {
 
 async function connectIfNeeded(bbox: BBox) {
   const store = ensureStore();
+  db.prepare(`
+  DELETE FROM ais_snapshots
+  WHERE updatedAt < ?
+`).run(Date.now() - 6 * 60 * 60 * 1000); // 6 hours
+
 
   const key = process.env.AISSTREAM_API_KEY;
   if (!key) throw new Error("Missing AISSTREAM_API_KEY in environment.");
@@ -290,30 +295,7 @@ async function connectIfNeeded(bbox: BBox) {
     store.imoByMmsi.set(mmsi, imo);
   }
 
-  // ✅ PERSIST static identity to DB (THIS is the new part)
-  db.prepare(`
-    INSERT INTO ais_vessels (
-      mmsi,
-      imo,
-      name,
-      callsign,
-      shipType,
-      lastSeenISO
-    ) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(mmsi) DO UPDATE SET
-      imo = COALESCE(excluded.imo, ais_vessels.imo),
-      name = COALESCE(excluded.name, ais_vessels.name),
-      callsign = COALESCE(excluded.callsign, ais_vessels.callsign),
-      shipType = COALESCE(excluded.shipType, ais_vessels.shipType),
-      lastSeenISO = excluded.lastSeenISO
-  `).run(
-    mmsi,
-    imo,
-    name,
-    callsign,
-    shipType,
-    new Date().toISOString()
-  );
+ 
 
   // If we already have position under MMSI, patch it with static details
   const mmsiKey = `MMSI:${mmsi}`;
@@ -375,7 +357,82 @@ async function connectIfNeeded(bbox: BBox) {
           shipType: (st?.shipType ?? prev?.shipType) ?? null,
         };
 
+        
+
         store.positionsByKey.set(keyId, next);
+const now = Date.now();
+
+db.prepare(`
+  INSERT INTO ais_snapshots (
+    mmsi,
+    imo,
+    name,
+    shipType,
+    lat,
+    lon,
+    sog,
+    cog,
+    lastSeenISO,
+    updatedAt
+  )
+  VALUES (
+    @mmsi,
+    @imo,
+    @name,
+    @shipType,
+    @lat,
+    @lon,
+    @sog,
+    @cog,
+    @lastSeenISO,
+    @updatedAt
+  )
+  ON CONFLICT(mmsi) DO UPDATE SET
+    imo = COALESCE(excluded.imo, ais_snapshots.imo),
+    name = COALESCE(excluded.name, ais_snapshots.name),
+    shipType = COALESCE(excluded.shipType, ais_snapshots.shipType),
+    lat = excluded.lat,
+    lon = excluded.lon,
+    sog = excluded.sog,
+    cog = excluded.cog,
+    lastSeenISO = excluded.lastSeenISO,
+    updatedAt = excluded.updatedAt
+`).run({
+  mmsi: next.mmsi,
+  imo: next.imo ?? null,
+  name: next.name ?? null,
+  shipType: typeof next.shipType === "number" ? next.shipType : null,
+  lat: next.lat,
+  lon: next.lon,
+  sog: next.sog ?? null,
+  cog: next.cog ?? null,
+  lastSeenISO: next.lastSeenISO,
+  updatedAt: now,
+});
+
+if (next.mmsi || next.imo) {
+  db.prepare(`
+    INSERT INTO vessel_identity (
+      imo,
+      mmsi,
+      name,
+      firstSeenAt,
+      lastSeenAt
+    )
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(mmsi) DO UPDATE SET
+      imo = COALESCE(excluded.imo, vessel_identity.imo),
+      name = COALESCE(excluded.name, vessel_identity.name),
+      lastSeenAt = excluded.lastSeenAt
+  `).run(
+    next.imo ?? null,
+    next.mmsi ?? null,
+    next.name ?? null,
+    now,
+    now
+  );
+}
+
 
         if (next.imo && /^\d{7}$/.test(next.imo)) {
           store.positionsByKey.set(`IMO:${next.imo}`, next);
@@ -407,50 +464,49 @@ export async function GET(req: Request) {
 
     await connectIfNeeded(bbox);
 
-    // FIX 3: dedupe so we don't return duplicates from MMSI + IMO mirrored entries
-    // Prefer MMSI records, and attach IMO if we have it.
-    const byMmsi = new Map<string, AisPosition>();
+    // STEP 4: Serve AIS from SQLite (stable), not live memory
 
-    for (const [k, v] of store.positionsByKey.entries()) {
-      // Only use MMSI:* as the canonical row
-      if (!k.startsWith("MMSI:")) continue;
-      const mmsi = (v.mmsi || "").trim();
-      if (!/^\d{9}$/.test(mmsi)) continue;
+const cutoff = Date.now() - 3 * 60 * 60 * 1000; // 3 hours
 
-      const imo = store.imoByMmsi.get(mmsi) || v.imo;
-      byMmsi.set(mmsi, { ...v, mmsi, imo });
-    }
+const dbRows = db.prepare(`
+  SELECT
+    mmsi,
+    imo,
+    name,
+    shipType,
+    lat,
+    lon,
+    sog,
+    cog,
+    lastSeenISO,
+    updatedAt
+  FROM ais_snapshots
+  WHERE updatedAt >= ?
+`).all(cutoff) as any[];
 
-    const rows: SnapshotRow[] = [];
+const rows: SnapshotRow[] = dbRows.map((v) => {
+  const distanceMi = haversineMiles(
+    cityHall.lat,
+    cityHall.lon,
+    v.lat,
+    v.lon
+  );
 
-const hydrateStmt = db.prepare(`
-  SELECT imo, name, callsign, shipType
-  FROM ais_vessels
-  WHERE mmsi = ?
-`);
+  return {
+    mmsi: v.mmsi,
+    imo: v.imo,
+    name: v.name,
+    shipType: v.shipType,
+    lat: v.lat,
+    lon: v.lon,
+    sog: v.sog,
+    cog: v.cog,
+    lastSeenISO: v.lastSeenISO,
+    distanceMi,
+  };
+});
+rows.sort((a, b) => a.distanceMi - b.distanceMi);
 
-for (const v of byMmsi.values()) {
-  let hydrated = v;
-
-  if (v.mmsi) {
-    const dbRow = hydrateStmt.get(v.mmsi) as any;
-    if (dbRow) {
-      hydrated = {
-        ...v,
-        imo: v.imo || dbRow.imo,
-        name: v.name || dbRow.name,
-        callsign: v.callsign || dbRow.callsign,
-        shipType: v.shipType ?? dbRow.shipType,
-      };
-    }
-  }
-
-  const distanceMi = haversineMiles(cityHall.lat, cityHall.lon, hydrated.lat, hydrated.lon);
-  rows.push({ ...hydrated, distanceMi });
-}
-
-
-    rows.sort((a, b) => a.distanceMi - b.distanceMi);
 
     const debug = searchParams.get("debug") === "1";
 
@@ -466,14 +522,25 @@ for (const v of byMmsi.values()) {
       count: rows.length,
       vessels: rows.slice(0, 200),
       ...(debug
-        ? {
-            debug: {
-              lastParsedType: store.lastParsedType,
-              lastParsedKeys: store.lastParsedKeys,
-              lastRawPreview: store.lastRaw ? store.lastRaw.slice(0, 280) : null,
-            },
-          }
-        : null),
+  ? {
+      debug: {
+        lastParsedType: store.lastParsedType,
+        lastParsedKeys: store.lastParsedKeys,
+        lastRawPreview: store.lastRaw ? store.lastRaw.slice(0, 280) : null,
+        dbCounts: {
+          snapshots: (db
+          .prepare("SELECT COUNT(*) AS c FROM ais_snapshots")
+          .get() as { c: number } | undefined)?.c ?? 0,
+
+        identities: (db
+          .prepare("SELECT COUNT(*) AS c FROM vessel_identity")
+          .get() as { c: number } | undefined)?.c ?? 0,
+
+        },
+      },
+    }
+  : null),
+
     });
   } catch (e: any) {
     return NextResponse.json(

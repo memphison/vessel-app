@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS ais_snapshots (
   mmsi TEXT PRIMARY KEY,
   imo TEXT,
   name TEXT,
-  shipType TEXT,
+  shipType INTEGER,
   lat REAL,
   lon REAL,
   sog REAL,
