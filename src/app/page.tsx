@@ -359,10 +359,9 @@ setAisVessels((prev) => {
 
   useEffect(() => {
   loadAis();
-  const id = setInterval(loadAis, 15_000); // poll every 15s
-  return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
+
 
 
   useEffect(() => {
@@ -472,11 +471,10 @@ setAisVessels((prev) => {
   }
 
   useEffect(() => {
-    load(dir, timeWindow);
-    const id = setInterval(() => load(dir, timeWindow), 60_000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dir, timeWindow]);
+  load(dir, timeWindow);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [dir, timeWindow]);
+
 
   useEffect(() => {
     if (events.length > 0) loadVesselInfos(events);
@@ -601,7 +599,7 @@ return [...aisUnderwayEvents, ...scheduled];
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl-Savannah</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Big ships moving on the Savannah River in the {windowLabel}.
