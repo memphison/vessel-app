@@ -1,10 +1,13 @@
-import { getDb } from "@/src/lib/db";
-import type { Pool } from "pg";
+import pkg from "pg";
+const { Pool } = pkg;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
 async function init() {
-  const db: Pool = getDb();
-
-  await db.query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS ais_snapshots (
       mmsi TEXT PRIMARY KEY,
       imo TEXT,
@@ -19,7 +22,7 @@ async function init() {
     );
   `);
 
-  await db.query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS vessel_identity (
       mmsi TEXT PRIMARY KEY,
       imo TEXT,
@@ -29,19 +32,21 @@ async function init() {
     );
   `);
 
-  await db.query(`
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_ais_recent
       ON ais_snapshots(updated_at);
+  `);
 
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_ais_location
       ON ais_snapshots(lat, lon);
   `);
 
   console.log("✅ Database initialized");
-  process.exit(0);
+  await pool.end();
 }
 
-init().catch((e) => {
-  console.error(e);
+init().catch((err) => {
+  console.error(err);
   process.exit(1);
 });

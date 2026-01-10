@@ -1,4 +1,3 @@
-// src/lib/db.ts
 import { Pool } from "pg";
 
 declare global {
@@ -6,7 +5,7 @@ declare global {
   var __PG_POOL__: Pool | undefined;
 }
 
-export function getDb() {
+export function getDb(): Pool {
   if (!global.__PG_POOL__) {
     if (!process.env.DATABASE_URL) {
       throw new Error("DATABASE_URL is not set");
