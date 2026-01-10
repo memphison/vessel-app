@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-
-
 
 // This is the ais-live route file
-
 export const runtime = "nodejs"; // WebSocket not supported in Edge
 
 type BBox = [[[number, number], [number, number]]];
@@ -12,19 +8,15 @@ type BBox = [[[number, number], [number, number]]];
 type AisPosition = {
   imo?: string;
   mmsi?: string;
-
-  // ✅ from ShipStaticData when available
   name?: string | null;
   callsign?: string | null;
   shipType?: string | number | null;
-
   lat: number;
   lon: number;
-  sog?: number; // knots
-  cog?: number; // degrees
+  sog?: number;
+  cog?: number;
   lastSeenISO: string;
 };
-
 
 type SnapshotRow = AisPosition & {
   distanceMi: number;
@@ -39,15 +31,12 @@ declare global {
         lastMessageISO: string | null;
         lastError: string | null;
         bboxKey: string | null;
-
-        // Positions keyed by MMSI and sometimes mirrored under IMO
         positionsByKey: Map<string, AisPosition>;
-
-        // Static mapping so ShipStaticData can arrive before PositionReport
         imoByMmsi: Map<string, string>;
-        staticByMmsi: Map<string, { name?: string | null; callsign?: string | null; shipType?: any | null }>;
-
-        // debug
+        staticByMmsi: Map<
+          string,
+          { name?: string | null; callsign?: string | null; shipType?: any | null }
+        >;
         lastRaw?: string | null;
         lastParsedType?: string | null;
         lastParsedKeys?: string[] | null;
@@ -62,7 +51,9 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) 
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -75,13 +66,12 @@ function ensureStore() {
       lastMessageISO: null,
       lastError: null,
       bboxKey: null,
-      positionsByKey: new Map<string, AisPosition>(),
-      imoByMmsi: new Map<string, string>(),
+      positionsByKey: new Map(),
+      imoByMmsi: new Map(),
+      staticByMmsi: new Map(),
       lastRaw: null,
       lastParsedType: null,
       lastParsedKeys: null,
-      staticByMmsi: new Map(),
-
     };
   }
   return globalThis.__AISSTREAM__!;
@@ -91,27 +81,18 @@ function presetConfig(presetRaw: string | null) {
   const preset = (presetRaw || "sav").toLowerCase();
 
   if (preset === "ny") {
-    const city = { lat: 40.7128, lon: -74.006 };
-    const bbox: BBox = [[[40.45, -74.35], [40.95, -73.6]]];
-    return { preset: "ny", cityHall: city, bbox };
+    return {
+      preset: "ny",
+      cityHall: { lat: 40.7128, lon: -74.006 },
+      bbox: [[[40.45, -74.35], [40.95, -73.6]]] as BBox,
+    };
   }
 
-  // Savannah (City Hall-ish)
-  const city = { lat: 32.08077, lon: -81.0903 };
-
-  // Savannah bbox (SW, NE) in [lat, lon] pairs
-  const bbox: BBox = [[[31.968366, -81.169962], [32.190078, -80.623403]]];
-
-  return { preset: "sav", cityHall: city, bbox };
-}
-
-function closeWs(store: ReturnType<typeof ensureStore>) {
-  try {
-    store.ws?.close();
-  } catch {
-    // ignore
-  }
-  store.ws = null;
+  return {
+    preset: "sav",
+    cityHall: { lat: 32.08077, lon: -81.0903 },
+    bbox: [[[31.968366, -81.169962], [32.190078, -80.623403]]] as BBox,
+  };
 }
 
 function normStr(v: any) {
@@ -138,7 +119,6 @@ function pickImo(msg: any, pr: any, sd: any) {
     normStr(msg?.IMO) ||
     normStr(pr?.IMO) ||
     null;
-
   return imo && /^\d{7}$/.test(imo) ? imo : null;
 }
 
@@ -150,458 +130,149 @@ function pickLatLon(pr: any) {
 }
 
 function pickSogCog(pr: any) {
-  const sogRaw = pr?.Sog ?? pr?.sog ?? pr?.SpeedOverGround;
-  const cogRaw = pr?.Cog ?? pr?.cog ?? pr?.CourseOverGround;
-
-  const sog = sogRaw != null && sogRaw !== "" ? Number(sogRaw) : null;
-  const cog = cogRaw != null && cogRaw !== "" ? Number(cogRaw) : null;
+  const sog = Number(pr?.Sog ?? pr?.sog ?? pr?.SpeedOverGround);
+  const cog = Number(pr?.Cog ?? pr?.cog ?? pr?.CourseOverGround);
 
   return {
-    sog: Number.isFinite(sog as number) ? (sog as number) : null,
-    cog: Number.isFinite(cog as number) ? (cog as number) : null,
+    sog: Number.isFinite(sog) ? sog : undefined,
+    cog: Number.isFinite(cog) ? cog : undefined,
   };
 }
 
-// Normalize evt.data into a UTF-8 string
+
 async function dataToText(d: any): Promise<string> {
   if (typeof d === "string") return d;
-
-  // Blob (common in some runtimes)
-  if (d && typeof d === "object" && typeof d.text === "function") {
-    return await d.text();
-  }
-
-  // Buffer or ArrayBuffer
-  if (d && typeof d?.toString === "function") {
-    return d.toString("utf8");
-  }
-  if (d instanceof ArrayBuffer) {
-    return Buffer.from(d).toString("utf8");
-  }
-  if (ArrayBuffer.isView(d)) {
-    return Buffer.from(d.buffer).toString("utf8");
-  }
-
+  if (d?.text) return await d.text();
+  if (d?.toString) return d.toString("utf8");
   return "";
 }
 
 async function connectIfNeeded(bbox: BBox) {
-  const db = getDb();            // ✅ ADD THIS LINE
   const store = ensureStore();
-
-  db.prepare(`
-    DELETE FROM ais_snapshots
-    WHERE updatedAt < ?
-  `).run(Date.now() - 6 * 60 * 60 * 1000);
- // 6 hours
-
-
   const key = process.env.AISSTREAM_API_KEY;
-  if (!key) throw new Error("Missing AISSTREAM_API_KEY in environment.");
+  if (!key) throw new Error("Missing AISSTREAM_API_KEY");
 
-  const nextKey = JSON.stringify(bbox);
+  const bboxKey = JSON.stringify(bbox);
+  if (store.bboxKey !== bboxKey) {
+    store.ws?.close();
+    store.positionsByKey.clear();
+    store.imoByMmsi.clear();
+    store.staticByMmsi.clear();
+    store.bboxKey = bboxKey;
+  }
 
-  if (store.bboxKey && store.bboxKey !== nextKey) {
-  closeWs(store);
-  store.positionsByKey.clear();
-  store.imoByMmsi.clear();
-  store.staticByMmsi.clear(); // ✅ add THIS line here
-  store.lastMessageISO = null;
-  store.lastError = null;
-}
-
-
-  store.bboxKey = nextKey;
-
-  if (store.ws && (store.ws.readyState === 0 || store.ws.readyState === 1)) return;
+  if (store.ws) return;
 
   const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
   store.ws = ws;
   store.lastConnectISO = new Date().toISOString();
-  store.lastError = null;
 
   ws.addEventListener("open", () => {
-    try {
-      ws.send(
-        JSON.stringify({
-          APIKey: key,
-
-          // IMPORTANT: AISStream expects an array of bboxes, each bbox is [[swLat,swLon],[neLat,neLon]]
-          // Your bbox var is already that shape.
-          BoundingBoxes: bbox,
-
-          // FIX 1: include Class B position reports so we don't miss vessels like 431332000
-          FilterMessageTypes: [
-            "PositionReport",
-            "StandardClassBPositionReport",
-            "ExtendedClassBPositionReport",
-            "ShipStaticData",
-          ],
-        })
-      );
-    } catch {
-      store.lastError = "Failed to send subscription";
-    }
+    ws.send(
+      JSON.stringify({
+        APIKey: key,
+        BoundingBoxes: bbox,
+        FilterMessageTypes: [
+          "PositionReport",
+          "StandardClassBPositionReport",
+          "ExtendedClassBPositionReport",
+          "ShipStaticData",
+        ],
+      })
+    );
   });
 
   ws.addEventListener("message", async (evt) => {
-    const db = getDb(); 
     store.lastMessageISO = new Date().toISOString();
-     
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const d: any = (evt as any).data;
-      const raw = await dataToText(d);
+    const raw = await dataToText((evt as any).data);
+    if (!raw) return;
 
-      if (!raw) {
-        store.lastRaw = null;
-        store.lastParsedType = null;
-        store.lastParsedKeys = null;
-        return;
-      }
+    store.lastRaw = raw;
+    const parsed = JSON.parse(raw);
+    const mt = parsed?.MessageType;
+    const msg = parsed?.Message;
+    if (!mt || !msg) return;
 
-      store.lastRaw = raw;
+    if (mt === "ShipStaticData") {
+      const mmsi = pickMmsi(parsed, msg, null, msg);
+      if (!mmsi) return;
 
-      const parsed = JSON.parse(raw);
+      store.staticByMmsi.set(mmsi, {
+        name: normStr(msg?.Name || msg?.ShipName),
+        callsign: normStr(msg?.CallSign),
+        shipType: msg?.ShipType ?? null,
+      });
 
-      const mt = String(parsed?.MessageType || "").trim();
-      store.lastParsedType = mt || null;
-
-      const msg = parsed?.Message;
-      if (!mt || !msg) return;
-
-      store.lastParsedKeys = msg ? Object.keys(msg) : null;
-
-      const prA = msg?.PositionReport ?? null;
-      const prB = msg?.StandardClassBPositionReport ?? null;
-      const prBext = msg?.ExtendedClassBPositionReport ?? null;
-      const sd = msg?.ShipStaticData ?? null;
-
-     if (mt === "ShipStaticData") {
-  const sdObj = sd ?? msg;
-  const mmsi = pickMmsi(parsed, msg, null, sdObj);
-  const imo = pickImo(msg, null, sdObj);
-
-  // ✅ Name fields vary, grab a few common ones
-  const name =
-    normStr(sdObj?.Name) ||
-    normStr(sdObj?.ShipName) ||
-    normStr(sdObj?.VesselName) ||
-    null;
-
-  const callsign = normStr(sdObj?.CallSign) || null;
-  const shipType = sdObj?.ShipType ?? sdObj?.Type ?? null;
-
-  // 🔥 CRITICAL: backfill static data into SQLite
-if (mmsi && /^\d{9}$/.test(mmsi)) {
-  const now = Date.now();
-
-  db.prepare(`
-    UPDATE ais_snapshots
-    SET
-      imo = COALESCE(?, imo),
-      name = COALESCE(?, name),
-      shipType = COALESCE(?, shipType),
-      updatedAt = ?
-    WHERE mmsi = ?
-  `).run(
-    imo ?? null,
-    name ?? null,
-    typeof shipType === "number" ? shipType : null,
-    now,
-    mmsi
-  );
-
-  db.prepare(`
-    INSERT INTO vessel_identity (
-      imo,
-      mmsi,
-      name,
-      firstSeenAt,
-      lastSeenAt
-    )
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(mmsi) DO UPDATE SET
-      imo = COALESCE(excluded.imo, vessel_identity.imo),
-      name = COALESCE(excluded.name, vessel_identity.name),
-      lastSeenAt = excluded.lastSeenAt
-  `).run(
-    imo ?? null,
-    mmsi,
-    name ?? null,
-    now,
-    now
-  );
-}
-
-
-  if (mmsi && /^\d{9}$/.test(mmsi)) {
-  // ✅ store static details even if IMO is missing
-  store.staticByMmsi.set(mmsi, { name, callsign, shipType });
-
-  if (imo) {
-    store.imoByMmsi.set(mmsi, imo);
-  }
-
- 
-
-  // If we already have position under MMSI, patch it with static details
-  const mmsiKey = `MMSI:${mmsi}`;
-  const rec = store.positionsByKey.get(mmsiKey);
-  if (rec) {
-    const patched = {
-      ...rec,
-      mmsi,
-      imo: imo || rec.imo,
-      name: name || rec.name,
-      callsign: callsign || rec.callsign,
-      shipType: shipType ?? rec.shipType,
-    };
-    store.positionsByKey.set(mmsiKey, patched);
-
-    if (patched.imo && /^\d{7}$/.test(patched.imo)) {
-      store.positionsByKey.set(`IMO:${patched.imo}`, patched);
+      const imo = pickImo(msg, null, msg);
+      if (imo) store.imoByMmsi.set(mmsi, imo);
+      return;
     }
-  }
-}
 
+    if (
+      mt === "PositionReport" ||
+      mt === "StandardClassBPositionReport" ||
+      mt === "ExtendedClassBPositionReport"
+    ) {
+      const ll = pickLatLon(msg);
+      if (!ll) return;
 
-  return;
-}
+      const mmsi = pickMmsi(parsed, msg, msg, null);
+      if (!mmsi) return;
 
+      const st = store.staticByMmsi.get(mmsi);
+      const { sog, cog } = pickSogCog(msg);
 
-      // FIX 2: handle PositionReport + BOTH Class B position report types
-      if (
-        mt === "PositionReport" ||
-        mt === "StandardClassBPositionReport" ||
-        mt === "ExtendedClassBPositionReport"
-      ) {
-        const prObj = prA ?? prB ?? prBext ?? msg;
-
-        const ll = pickLatLon(prObj);
-        if (!ll) return;
-
-        const mmsi = pickMmsi(parsed, msg, prObj, null);
-        if (!mmsi || !/^\d{9}$/.test(mmsi)) return;
-
-        const keyId = `MMSI:${mmsi}`;
-        const prev = store.positionsByKey.get(keyId);
-
-        const { sog, cog } = pickSogCog(prObj);
-
-        const imoFromStatic = store.imoByMmsi.get(mmsi) || null;
-        const st = store.staticByMmsi.get(mmsi) || null;
-
-        const next: AisPosition = {
-          imo: imoFromStatic || prev?.imo,
-          mmsi,
-          lat: ll.lat,
-          lon: ll.lon,
-          sog: sog != null ? sog : prev?.sog,
-          cog: cog != null ? cog : prev?.cog,
-          lastSeenISO: new Date().toISOString(),
-          name: st?.name || prev?.name || null,
-          callsign: st?.callsign || prev?.callsign || null,
-          shipType: (st?.shipType ?? prev?.shipType) ?? null,
-        };
-
-        
-
-        store.positionsByKey.set(keyId, next);
-const now = Date.now();
-
-db.prepare(`
-  INSERT INTO ais_snapshots (
-    mmsi,
-    imo,
-    name,
-    shipType,
-    lat,
-    lon,
-    sog,
-    cog,
-    lastSeenISO,
-    updatedAt
-  )
-  VALUES (
-    @mmsi,
-    @imo,
-    @name,
-    @shipType,
-    @lat,
-    @lon,
-    @sog,
-    @cog,
-    @lastSeenISO,
-    @updatedAt
-  )
-  ON CONFLICT(mmsi) DO UPDATE SET
-    imo = COALESCE(excluded.imo, ais_snapshots.imo),
-    name = COALESCE(excluded.name, ais_snapshots.name),
-    shipType = COALESCE(excluded.shipType, ais_snapshots.shipType),
-    lat = excluded.lat,
-    lon = excluded.lon,
-    sog = excluded.sog,
-    cog = excluded.cog,
-    lastSeenISO = excluded.lastSeenISO,
-    updatedAt = excluded.updatedAt
-`).run({
-  mmsi: next.mmsi,
-  imo: next.imo ?? null,
-  name: next.name ?? null,
-  shipType: typeof next.shipType === "number" ? next.shipType : null,
-  lat: next.lat,
-  lon: next.lon,
-  sog: next.sog ?? null,
-  cog: next.cog ?? null,
-  lastSeenISO: next.lastSeenISO,
-  updatedAt: now,
-});
-
-if (next.mmsi || next.imo) {
-  db.prepare(`
-    INSERT INTO vessel_identity (
-      imo,
-      mmsi,
-      name,
-      firstSeenAt,
-      lastSeenAt
-    )
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(mmsi) DO UPDATE SET
-      imo = COALESCE(excluded.imo, vessel_identity.imo),
-      name = COALESCE(excluded.name, vessel_identity.name),
-      lastSeenAt = excluded.lastSeenAt
-  `).run(
-    next.imo ?? null,
-    next.mmsi ?? null,
-    next.name ?? null,
-    now,
-    now
-  );
-}
-
-
-        if (next.imo && /^\d{7}$/.test(next.imo)) {
-          store.positionsByKey.set(`IMO:${next.imo}`, next);
-        }
-
-        return;
-      }
-    } catch {
-      // ignore parse errors
+      store.positionsByKey.set(`MMSI:${mmsi}`, {
+        mmsi,
+        imo: store.imoByMmsi.get(mmsi),
+        lat: ll.lat,
+        lon: ll.lon,
+        sog,
+        cog,
+        name: st?.name ?? null,
+        callsign: st?.callsign ?? null,
+        shipType: st?.shipType ?? null,
+        lastSeenISO: new Date().toISOString(),
+      });
     }
   });
 
   ws.addEventListener("close", () => {
     store.ws = null;
   });
-
-  ws.addEventListener("error", () => {
-    store.lastError = "WebSocket error";
-    store.ws = null;
-  });
 }
 
 export async function GET(req: Request) {
-  const db = getDb(); 
   const store = ensureStore();
+  const { searchParams } = new URL(req.url);
+  const { preset, cityHall, bbox } = presetConfig(searchParams.get("preset"));
 
-  try {
-    const { searchParams } = new URL(req.url);
-    const { preset, cityHall, bbox } = presetConfig(searchParams.get("preset"));
+  await connectIfNeeded(bbox);
 
-    await connectIfNeeded(bbox);
+  const rows: SnapshotRow[] = [];
 
-    // STEP 4: Serve AIS from SQLite (stable), not live memory
-
-const cutoff = Date.now() - 3 * 60 * 60 * 1000; // 3 hours
-
-const dbRows = db.prepare(`
-  SELECT
-    mmsi,
-    imo,
-    name,
-    shipType,
-    lat,
-    lon,
-    sog,
-    cog,
-    lastSeenISO,
-    updatedAt
-  FROM ais_snapshots
-  WHERE updatedAt >= ?
-`).all(cutoff) as any[];
-
-const rows: SnapshotRow[] = dbRows.map((v) => {
-  const distanceMi = haversineMiles(
-    cityHall.lat,
-    cityHall.lon,
-    v.lat,
-    v.lon
-  );
-
-  return {
-    mmsi: v.mmsi,
-    imo: v.imo,
-    name: v.name,
-    shipType: v.shipType,
-    lat: v.lat,
-    lon: v.lon,
-    sog: v.sog,
-    cog: v.cog,
-    lastSeenISO: v.lastSeenISO,
-    distanceMi,
-  };
-});
-rows.sort((a, b) => a.distanceMi - b.distanceMi);
-
-
-    const debug = searchParams.get("debug") === "1";
-
-    return NextResponse.json({
-      ok: true,
-      preset,
-      cityHall,
-      bbox,
-      lastConnectISO: store.lastConnectISO,
-      lastMessageISO: store.lastMessageISO,
-      lastError: store.lastError,
-      wsReadyState: store.ws ? store.ws.readyState : null,
-      count: rows.length,
-      vessels: rows.slice(0, 200),
-      ...(debug
-  ? {
-      debug: {
-        lastParsedType: store.lastParsedType,
-        lastParsedKeys: store.lastParsedKeys,
-        lastRawPreview: store.lastRaw ? store.lastRaw.slice(0, 280) : null,
-        dbCounts: {
-          snapshots: (db
-          .prepare("SELECT COUNT(*) AS c FROM ais_snapshots")
-          .get() as { c: number } | undefined)?.c ?? 0,
-
-        identities: (db
-          .prepare("SELECT COUNT(*) AS c FROM vessel_identity")
-          .get() as { c: number } | undefined)?.c ?? 0,
-
-        },
-      },
-    }
-  : null),
-
-    });
-  } catch (e: any) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: e?.message || "AIS stream error",
-        lastConnectISO: store.lastConnectISO,
-        lastMessageISO: store.lastMessageISO,
-        lastError: store.lastError,
-        wsReadyState: store.ws ? store.ws.readyState : null,
-      },
-      { status: 500 }
+  for (const v of store.positionsByKey.values()) {
+    const distanceMi = haversineMiles(
+      cityHall.lat,
+      cityHall.lon,
+      v.lat,
+      v.lon
     );
+    rows.push({ ...v, distanceMi });
   }
+
+  rows.sort((a, b) => a.distanceMi - b.distanceMi);
+
+  return NextResponse.json({
+    ok: true,
+    preset,
+    cityHall,
+    bbox,
+    lastConnectISO: store.lastConnectISO,
+    lastMessageISO: store.lastMessageISO,
+    lastError: store.lastError,
+    wsReadyState: store.ws?.readyState ?? null,
+    count: rows.length,
+    vessels: rows.slice(0, 200),
+  });
 }
