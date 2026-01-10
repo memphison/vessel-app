@@ -80,6 +80,8 @@ export async function GET(req: Request) {
       return m ? m[1].trim() : null;
     };
 
+    const mmsiFromPage = extract("MMSI");
+
     const rawSize = extract("Size");
 
     let lengthM: string | null = null;
@@ -96,7 +98,8 @@ export async function GET(req: Request) {
     const response: VesselInfo = {
       ok: true,
       imo: imo ?? undefined,
-      mmsi: mmsi ?? undefined,
+      mmsi: mmsiFromPage ?? mmsi ?? undefined,
+
 
       // Normalized size (used by UI)
       lengthM,
@@ -118,6 +121,7 @@ export async function GET(req: Request) {
   ts: Date.now(),
   data: response,
 });
+
 
 
    return NextResponse.json(response);
