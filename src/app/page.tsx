@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 // Retain AIS hits briefly to survive feed drops
-const AIS_RETENTION_MS = 10 * 60 * 1000; // 10 minutes
+const AIS_RETENTION_MS = 3 * 60 * 1000; // 3 minutes
 
 
 type VesselEvent = {
@@ -261,10 +261,10 @@ export default function HomePage() {
       const resp = await fetch(`/api/ais-live`, { cache: "no-store" });
       const data: AisSnapshot = await resp.json();
 
-      if (!resp.ok || !data?.ok || !Array.isArray(data.vessels) || data.vessels.length === 0) {
-  // Do NOT clear existing AIS state on empty or flaky feed
+     if (!resp.ok || !data?.ok || !Array.isArray(data.vessels)) {
   return;
 }
+
 
 
       const byImo: Record<string, AisVessel> = {};
@@ -319,6 +319,8 @@ setAisByMmsi((prev) => ({ ...prev, ...byMmsi }));
 
   return true;
 });
+
+console.log("AIS IMOs:", Object.keys(byImo));
 
 
 setAisVessels((prev) => {
@@ -599,7 +601,7 @@ return [...aisUnderwayEvents, ...scheduled];
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl-test</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Big ships moving on the Savannah River in the {windowLabel}.
