@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
+
 
 
 // This is the ais-live route file
@@ -185,11 +186,14 @@ async function dataToText(d: any): Promise<string> {
 }
 
 async function connectIfNeeded(bbox: BBox) {
+  const db = getDb();            // ✅ ADD THIS LINE
   const store = ensureStore();
+
   db.prepare(`
-  DELETE FROM ais_snapshots
-  WHERE updatedAt < ?
-`).run(Date.now() - 6 * 60 * 60 * 1000); // 6 hours
+    DELETE FROM ais_snapshots
+    WHERE updatedAt < ?
+  `).run(Date.now() - 6 * 60 * 60 * 1000);
+ // 6 hours
 
 
   const key = process.env.AISSTREAM_API_KEY;
@@ -241,8 +245,9 @@ async function connectIfNeeded(bbox: BBox) {
   });
 
   ws.addEventListener("message", async (evt) => {
+    const db = getDb(); 
     store.lastMessageISO = new Date().toISOString();
-
+     
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const d: any = (evt as any).data;
@@ -499,6 +504,7 @@ if (next.mmsi || next.imo) {
 }
 
 export async function GET(req: Request) {
+  const db = getDb(); 
   const store = ensureStore();
 
   try {
