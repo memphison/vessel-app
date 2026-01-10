@@ -1,7 +1,6 @@
 import { Pool } from "pg";
-
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 declare global {
-  // eslint-disable-next-line no-var
   var __PG_POOL__: Pool | undefined;
 }
 
@@ -13,9 +12,9 @@ export function getDb(): Pool {
 
     global.__PG_POOL__ = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === "production"
-        ? { rejectUnauthorized: false }
-        : false,
+      ssl: {
+        rejectUnauthorized: false, // REQUIRED for Railway in all environments
+      },
     });
   }
 

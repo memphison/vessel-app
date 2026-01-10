@@ -3,6 +3,21 @@ import { writeAisSnapshot } from "@/src/lib/ais/writeAisSnapshot";
 import { writeVesselIdentity } from "@/src/lib/db/writeVesselIdentity";
 import { pruneOldAisSnapshots } from "@/src/lib/db/pruneAisSnapshots";
 
+let lastPruneAt = 0;
+
+async function maybePruneOldAisSnapshots() {
+  const now = Date.now();
+
+  // Run at most once per hour
+  if (now - lastPruneAt < 60 * 60 * 1000) {
+    return;
+  }
+
+  lastPruneAt = now;
+  await pruneOldAisSnapshots();
+}
+
+
 
 // This is the ais-live route file
 export const runtime = "nodejs"; // WebSocket not supported in Edge
@@ -321,9 +336,7 @@ export async function GET(req: Request) {
 
   rows.sort((a, b) => a.distanceMi - b.distanceMi);
 
-
-await pruneOldAisSnapshots();
-
+  await maybePruneOldAisSnapshots();
 
   return NextResponse.json({
     ok: true,
