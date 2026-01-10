@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { writeAisSnapshot } from "@/src/lib/ais/writeAisSnapshot";
+import { writeVesselIdentity } from "@/src/lib/db/writeVesselIdentity";
+import { pruneOldAisSnapshots } from "@/src/lib/db/pruneAisSnapshots";
+
 
 // This is the ais-live route file
 export const runtime = "nodejs"; // WebSocket not supported in Edge
@@ -58,6 +62,15 @@ function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number) 
   return R * c;
 }
 
+type PendingWrite = AisPosition;
+
+declare global {
+  var __AIS_PENDING_WRITES__:
+    | PendingWrite[]
+    | undefined;
+}
+
+
 function ensureStore() {
   if (!globalThis.__AISSTREAM__) {
     globalThis.__AISSTREAM__ = {
@@ -74,6 +87,10 @@ function ensureStore() {
       lastParsedKeys: null,
     };
   }
+  if (!globalThis.__AIS_PENDING_WRITES__) {
+  globalThis.__AIS_PENDING_WRITES__ = [];
+}
+
   return globalThis.__AISSTREAM__!;
 }
 
@@ -146,6 +163,39 @@ async function dataToText(d: any): Promise<string> {
   if (d?.toString) return d.toString("utf8");
   return "";
 }
+
+async function flushAisWrites() {
+  const batch = globalThis.__AIS_PENDING_WRITES__;
+  if (!batch || batch.length === 0) return;
+
+  // Drain the queue immediately
+  globalThis.__AIS_PENDING_WRITES__ = [];
+
+  await Promise.all(
+    batch.map((ship) =>
+      Promise.all([
+        writeAisSnapshot({
+          mmsi: ship.mmsi!,
+          imo: ship.imo ?? null,
+          name: ship.name ?? null,
+          shipType:
+            typeof ship.shipType === "number" ? ship.shipType : null,
+          lat: ship.lat,
+          lon: ship.lon,
+          sog: ship.sog ?? null,
+          cog: ship.cog ?? null,
+          lastSeen: new Date(ship.lastSeenISO),
+        }),
+        writeVesselIdentity(
+          ship.mmsi!,
+          ship.imo ?? null,
+          ship.name ?? null
+        ),
+      ])
+    )
+  );
+}
+
 
 async function connectIfNeeded(bbox: BBox) {
   const store = ensureStore();
@@ -222,18 +272,26 @@ async function connectIfNeeded(bbox: BBox) {
       const st = store.staticByMmsi.get(mmsi);
       const { sog, cog } = pickSogCog(msg);
 
-      store.positionsByKey.set(`MMSI:${mmsi}`, {
-        mmsi,
-        imo: store.imoByMmsi.get(mmsi),
-        lat: ll.lat,
-        lon: ll.lon,
-        sog,
-        cog,
-        name: st?.name ?? null,
-        callsign: st?.callsign ?? null,
-        shipType: st?.shipType ?? null,
-        lastSeenISO: new Date().toISOString(),
-      });
+      const next: AisPosition = {
+  mmsi,
+  imo: store.imoByMmsi.get(mmsi),
+  lat: ll.lat,
+  lon: ll.lon,
+  sog,
+  cog,
+  name: st?.name ?? null,
+  callsign: st?.callsign ?? null,
+  shipType: st?.shipType ?? null,
+  lastSeenISO: new Date().toISOString(),
+};
+
+store.positionsByKey.set(`MMSI:${mmsi}`, next);
+
+// ⬇️⬇️⬇️ STEP 5: WRITE TO POSTGRES ⬇️⬇️⬇️
+
+globalThis.__AIS_PENDING_WRITES__!.push(next);
+
+
     }
   });
 
@@ -262,6 +320,10 @@ export async function GET(req: Request) {
   }
 
   rows.sort((a, b) => a.distanceMi - b.distanceMi);
+
+
+await pruneOldAisSnapshots();
+
 
   return NextResponse.json({
     ok: true,
