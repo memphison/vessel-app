@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 // Retain AIS hits briefly to survive feed drops
-const AIS_RETENTION_MS = 2 * 60 * 1000; // 2 minutes
+const AIS_RETENTION_MS = 10 * 60 * 1000; // 2 minutes
 
 
 type VesselEvent = {

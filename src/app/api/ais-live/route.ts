@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+
 
 // This is the ais-live route file
 
@@ -281,32 +283,58 @@ async function connectIfNeeded(bbox: BBox) {
   const shipType = sdObj?.ShipType ?? sdObj?.Type ?? null;
 
   if (mmsi && /^\d{9}$/.test(mmsi)) {
-    // ✅ store static details even if IMO is missing
-    store.staticByMmsi.set(mmsi, { name, callsign, shipType });
+  // ✅ store static details even if IMO is missing
+  store.staticByMmsi.set(mmsi, { name, callsign, shipType });
 
-    if (imo) {
-      store.imoByMmsi.set(mmsi, imo);
-    }
+  if (imo) {
+    store.imoByMmsi.set(mmsi, imo);
+  }
 
-    // If we already have position under MMSI, patch it with static details
-    const mmsiKey = `MMSI:${mmsi}`;
-    const rec = store.positionsByKey.get(mmsiKey);
-    if (rec) {
-      const patched = {
-        ...rec,
-        mmsi,
-        imo: imo || rec.imo,
-        name: name || rec.name,
-        callsign: callsign || rec.callsign,
-        shipType: shipType ?? rec.shipType,
-      };
-      store.positionsByKey.set(mmsiKey, patched);
+  // ✅ PERSIST static identity to DB (THIS is the new part)
+  db.prepare(`
+    INSERT INTO ais_vessels (
+      mmsi,
+      imo,
+      name,
+      callsign,
+      shipType,
+      lastSeenISO
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(mmsi) DO UPDATE SET
+      imo = COALESCE(excluded.imo, ais_vessels.imo),
+      name = COALESCE(excluded.name, ais_vessels.name),
+      callsign = COALESCE(excluded.callsign, ais_vessels.callsign),
+      shipType = COALESCE(excluded.shipType, ais_vessels.shipType),
+      lastSeenISO = excluded.lastSeenISO
+  `).run(
+    mmsi,
+    imo,
+    name,
+    callsign,
+    shipType,
+    new Date().toISOString()
+  );
 
-      if (patched.imo && /^\d{7}$/.test(patched.imo)) {
-        store.positionsByKey.set(`IMO:${patched.imo}`, patched);
-      }
+  // If we already have position under MMSI, patch it with static details
+  const mmsiKey = `MMSI:${mmsi}`;
+  const rec = store.positionsByKey.get(mmsiKey);
+  if (rec) {
+    const patched = {
+      ...rec,
+      mmsi,
+      imo: imo || rec.imo,
+      name: name || rec.name,
+      callsign: callsign || rec.callsign,
+      shipType: shipType ?? rec.shipType,
+    };
+    store.positionsByKey.set(mmsiKey, patched);
+
+    if (patched.imo && /^\d{7}$/.test(patched.imo)) {
+      store.positionsByKey.set(`IMO:${patched.imo}`, patched);
     }
   }
+}
+
 
   return;
 }
@@ -394,10 +422,33 @@ export async function GET(req: Request) {
     }
 
     const rows: SnapshotRow[] = [];
-    for (const v of byMmsi.values()) {
-      const distanceMi = haversineMiles(cityHall.lat, cityHall.lon, v.lat, v.lon);
-      rows.push({ ...v, distanceMi });
+
+const hydrateStmt = db.prepare(`
+  SELECT imo, name, callsign, shipType
+  FROM ais_vessels
+  WHERE mmsi = ?
+`);
+
+for (const v of byMmsi.values()) {
+  let hydrated = v;
+
+  if (v.mmsi) {
+    const dbRow = hydrateStmt.get(v.mmsi) as any;
+    if (dbRow) {
+      hydrated = {
+        ...v,
+        imo: v.imo || dbRow.imo,
+        name: v.name || dbRow.name,
+        callsign: v.callsign || dbRow.callsign,
+        shipType: v.shipType ?? dbRow.shipType,
+      };
     }
+  }
+
+  const distanceMi = haversineMiles(cityHall.lat, cityHall.lon, hydrated.lat, hydrated.lon);
+  rows.push({ ...hydrated, distanceMi });
+}
+
 
     rows.sort((a, b) => a.distanceMi - b.distanceMi);
 
