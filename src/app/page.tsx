@@ -301,7 +301,9 @@ for (const k of Object.keys(byName)) {
   if (t != null && t < 70) return false;
 
   // Speed sanity (allow unknown / slow but moving ships)
-if (v.sog != null && v.sog < 0.5) return false;
+// Do not drop stationary ships near port
+if (v.sog != null && v.sog < 0.5 && v.distanceMi > 5) return false;
+
 
 
   return true;
@@ -481,24 +483,20 @@ setAisVessels(filtered);
   const nowISO = new Date().toISOString();
 
   const aisUnderwayEvents: VesselEvent[] = (aisVessels || [])
-    .filter((v) => {
+   .filter((v) => {
   const t = shipTypeToNumber(v.shipType);
   const hasIMO = /^\d{7}$/.test(String(v.imo || "").trim());
 
-  // IMO ships are always allowed
-  if (hasIMO) {
-    return true;
-  }
+  // IMO ships always allowed
+  if (hasIMO) return true;
 
-  // MMSI-only ships with known large ship types
-  if (t != null) {
-    return t >= 70 && t <= 89;
-  }
+  // Known large ship types
+  if (t != null) return t >= 70;
 
-  // Fallback: MMSI-only large ships sometimes lack shipType
-  // Allow if clearly moving
-  return typeof v.sog === "number" && v.sog >= 5;
+  // MMSI-only fallback: allow if within port radius
+  return typeof v.distanceMi === "number" && v.distanceMi <= 8;
 })
+
 
 
 
@@ -561,7 +559,7 @@ return [...aisUnderwayEvents, ...scheduled];
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 880 }}>
-      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl-test</h1>
+      <h1 style={{ margin: 0, color: theme.pageText }}>The Waving Girl</h1>
 
       <p style={{ marginTop: 8, color: theme.subText }}>
         Big ships moving on the Savannah River in the {windowLabel}.
